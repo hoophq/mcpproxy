@@ -24,7 +24,7 @@ const (
 
 // InitializeParams is the client's initialize request payload (subset).
 type InitializeParams struct {
-	ProtocolVersion string     `json:"protocolVersion"`
+	ProtocolVersion string         `json:"protocolVersion"`
 	ClientInfo      Implementation `json:"clientInfo"`
 }
 

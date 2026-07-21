@@ -27,7 +27,7 @@ type State struct {
 	identity inspect.Identity
 
 	mu       sync.Mutex
-	pending  map[string]Pending          // jsonrpc.ID.Key() → request info
+	pending  map[string]Pending           // jsonrpc.ID.Key() → request info
 	tools    map[string]map[string]string // backend → tool name → fingerprint
 	counters map[string]*int64
 	meta     map[string]any
