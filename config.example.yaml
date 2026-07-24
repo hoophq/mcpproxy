@@ -1,0 +1,60 @@
+# mcpproxyd example configuration.
+listen: 127.0.0.1:8000
+
+# Inbound: how callers authenticate to the gateway.
+# Modes: anonymous | local | static | oidc | github | awssts
+inbound:
+  mode: anonymous
+  # mode: static
+  # token: ${MCPPROXY_TOKEN}
+  # mode: oidc
+  # issuer: https://accounts.google.com
+  # audience: mcpproxy
+
+# Backends: one entry = plain proxy; several = aggregation
+# (tools exposed as "<name>_<tool>").
+backends:
+  everything:
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything"]
+    env: {}
+  # linear:
+  #   transport: streamable-http
+  #   url: https://mcp.linear.app/mcp
+  #   auth: oauth          # none | static | passthrough | oauth
+  #   oauth:
+  #     per_user: false
+
+policy:
+  # allowed_tools: ["echo", "add"]
+  denied_tools: []
+  approval_tools: []        # e.g. ["*delete*"] holds those calls for review
+  # block_sampling / block_elicitation default to true (denied)
+  on_rug_pull: kill          # kill | alert
+  max_result_kb: 0           # 0 = unlimited
+  max_calls_per_session: 0
+  # overrides:
+  #   echo:
+  #     description: "Echoes back the input text."
+
+approvals:
+  timeout: 5m
+  api_token: ${MCPPROXY_APPROVAL_TOKEN}
+
+telemetry:
+  prometheus_path: /metrics
+  # otlp_endpoint: 127.0.0.1:4317
+  service_name: mcpproxyd
+
+wal_dir: ./sessions
+
+# auth_server:               # embedded OAuth AS: MCP clients OAuth against the gateway
+#   issuer: https://gw.example.com
+#   upstream:                 # federate login to company IdP
+#     issuer: https://accounts.google.com
+#     client_id: ...
+#     client_secret: ${IDP_SECRET}
+
+# optimizer:
+#   top_k: 10
+#   purpose: "manage github issues and pull requests"
