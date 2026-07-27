@@ -24,8 +24,6 @@ const (
 )
 
 // ExchangeConfig configures an RFC 8693 token-exchange source.
-//
-// Portions adapted from ToolHive (github.com/stacklok/toolhive), Apache-2.0.
 type ExchangeConfig struct {
 	TokenEndpoint string
 	ClientID      string

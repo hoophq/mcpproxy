@@ -1,0 +1,43 @@
+# Embedded OAuth authorization server: MCP clients OAuth against the
+# GATEWAY itself — no pre-shared tokens.
+#
+# The gateway serves RFC 8414 metadata, JWKS, RFC 7591 dynamic client
+# registration, /authorize (PKCE required), and /token. A client like
+# Claude Code discovers all of it automatically from the 401 challenge and
+# runs the browser flow.
+#
+# With `upstream` set, login federates to your company IdP: the user
+# authenticates there, the gateway issues its own (ES256) access token for
+# the MCP session, and KEEPS the upstream tokens — backends with
+# `auth: upstream_swap`-style needs can reuse them (see swap note below).
+#
+# Without `upstream`, /authorize auto-approves a local dev identity and
+# logs a warning — dev only.
+
+listen: 127.0.0.1:8000
+
+# inbound.mode is ignored when auth_server is set: the gateway validates
+# its own issued tokens.
+inbound:
+  mode: anonymous
+
+auth_server:
+  issuer: http://127.0.0.1:8000        # external URL of this gateway
+  signing_key_file: ${HOME}/.mcpproxy/authserver.pem   # generated if absent
+  access_token_ttl: 1h
+  upstream:                            # federate login to a company IdP
+    issuer: https://accounts.google.com
+    client_id: ${IDP_CLIENT_ID}
+    client_secret: ${IDP_CLIENT_SECRET}
+    scopes: ["openid", "email", "profile"]
+
+backends:
+  everything:
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything"]
+
+# Upstream-swap: a backend can reuse the caller's stored upstream IdP token
+# as its outbound credential (the user's own identity reaches the MCP
+# server). Wired programmatically when embedding
+# (authserver.NewUpstreamSwapSource); daemon-level YAML wiring is on the
+# roadmap.

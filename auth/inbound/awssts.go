@@ -14,12 +14,6 @@ import (
 	"github.com/hoophq/mcpproxy/inspect"
 )
 
-// Portions adapted from ToolHive (github.com/stacklok/toolhive), Apache-2.0:
-// the STS caller-identity verification and ARN→subject mapping flow follows the
-// shape of pkg/auth/awssts, reduced to presigned-URL verification. ToolHive
-// re-signs requests with SigV4 and calls AssumeRoleWithWebIdentity; the gateway
-// never holds AWS credentials, so it instead replays a URL the *caller* signed.
-
 // PresignedHeader carries the caller's presigned sts:GetCallerIdentity URL.
 const PresignedHeader = "X-Amz-Presigned-GetCallerIdentity"
 

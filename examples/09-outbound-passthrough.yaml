@@ -1,0 +1,24 @@
+# Outbound passthrough: each caller supplies its OWN upstream credential per
+# request via the X-Mcpproxy-Upstream-Authorization header. The gateway
+# promotes it to the backend's Authorization header; the gateway itself
+# stores no upstream tokens.
+#
+# This is per-user upstream identity without any OAuth machinery — useful
+# when the MCP client already manages tokens for the upstream service.
+#
+#   curl http://127.0.0.1:8000/mcp \
+#     -H "Authorization: Bearer $GATEWAY_TOKEN" \
+#     -H "X-Mcpproxy-Upstream-Authorization: Bearer $MY_LINEAR_TOKEN" \
+#     -d '{"jsonrpc":"2.0",...}'
+
+listen: 127.0.0.1:8000
+
+inbound:
+  mode: static             # authenticate to the GATEWAY with this…
+  token: ${GATEWAY_TOKEN}
+
+backends:
+  linear:
+    transport: streamable-http
+    url: https://mcp.linear.app/mcp
+    auth: passthrough      # …and to LINEAR with whatever the caller sends

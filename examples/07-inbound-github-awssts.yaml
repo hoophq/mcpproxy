@@ -1,0 +1,31 @@
+# Inbound GitHub / AWS STS: for callers that have no OIDC token but do have
+# a GitHub token or AWS credentials.
+
+listen: 127.0.0.1:8000
+
+# --- GitHub mode -----------------------------------------------------------
+# The caller sends its GitHub token; the gateway validates it against the
+# GitHub API (GET /user) and optionally requires membership in one of the
+# listed orgs. Identity: subject = GitHub login. Validated identities are
+# cached for 5 minutes.
+inbound:
+  mode: github
+  github_allowed_orgs: ["hoophq"]    # empty = any valid token
+
+# --- AWS STS mode (alternative; swap the block above) ------------------------
+# The caller presigns an STS GetCallerIdentity request and sends the URL in
+# the X-Amz-Presigned-GetCallerIdentity header. The gateway executes it
+# server-side, reads the caller ARN, and maps it to a subject.
+#
+# inbound:
+#   mode: awssts
+#   aws_role_mappings:
+#     # ARN glob → subject template. Placeholders: {arn} {account} {role}
+#     # {session} {partition} {service}
+#     "arn:aws:sts::123456789012:assumed-role/engineers/*": "aws:{role}:{session}"
+#     "arn:aws:iam::123456789012:user/*": "aws-user:{session}"
+
+backends:
+  everything:
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything"]

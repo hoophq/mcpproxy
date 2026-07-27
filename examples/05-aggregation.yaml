@@ -1,0 +1,35 @@
+# Aggregation: several MCP servers behind one endpoint (mini virtual-MCP).
+#
+# With more than one backend, the merged catalog prefixes every tool with
+# "<backend>_": the client sees "docs_search", "files_read_file", … and the
+# gateway strips the prefix when routing the call to the owning backend.
+# initialize and notifications fan out to every backend.
+
+listen: 127.0.0.1:8000
+
+inbound:
+  mode: anonymous
+
+backends:
+  files:
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp/sandbox"]
+
+  docs:
+    transport: streamable-http
+    url: https://mcp.context7.com/mcp
+    auth: static
+    headers:
+      Authorization: Bearer ${CONTEXT7_API_KEY}
+    # Per-backend policy overrides the global one, field by field.
+    policy:
+      denied_tools: ["*"]        # example: docs backend is list-only
+      allowed_tools: ["search*"]
+
+  everything:
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything"]
+
+# Global policy applies to backends without an override.
+policy:
+  max_calls_per_session: 200

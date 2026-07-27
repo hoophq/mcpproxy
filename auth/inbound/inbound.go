@@ -5,8 +5,6 @@
 // on config.Inbound.Mode so the daemon does not have to switch on strings.
 // Resolvers are called on every request from many goroutines and must be
 // safe for concurrent use.
-//
-// Portions adapted from ToolHive (github.com/stacklok/toolhive), Apache-2.0.
 package inbound
 
 import (

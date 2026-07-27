@@ -18,8 +18,6 @@
 // All state is in memory. Restarting the gateway invalidates outstanding
 // codes, refresh tokens and upstream tokens, and access tokens survive only if
 // a signing key file was configured.
-//
-// Portions adapted from ToolHive (github.com/stacklok/toolhive), Apache-2.0.
 package authserver
 
 import (

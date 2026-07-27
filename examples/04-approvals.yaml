@@ -1,0 +1,36 @@
+# Approvals: hold matching tool calls until a human resolves them.
+#
+# The client's tools/call blocks (MCP clients tolerate slow tools); a
+# reviewer approves or rejects over the REST API. Expiry rejects.
+#
+# Walkthrough:
+#   mcpproxyd -config examples/04-approvals.yaml &
+#   mcpsmoke -url http://127.0.0.1:8000/mcp -tool get-sum -args '{"a":40,"b":2}' &
+#
+#   export T=$MCPPROXY_APPROVAL_TOKEN
+#   curl -s -H "Authorization: Bearer $T" http://127.0.0.1:8000/approvals/ | jq
+#   # [{"id":"<ID>","tool":"get-sum","args":{...},"user":"anonymous",...}]
+#
+#   curl -X POST -H "Authorization: Bearer $T" \
+#     http://127.0.0.1:8000/approvals/<ID>/approve       # → client gets the result
+#   # …or /reject                                        # → client gets JSON-RPC
+#   #                                                    #   error -32011
+
+listen: 127.0.0.1:8000
+
+inbound:
+  mode: anonymous
+
+backends:
+  everything:
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything"]
+
+policy:
+  # Every tool matching these globs requires approval. Combine with
+  # denied_tools: deny wins, approval applies to what remains.
+  approval_tools: ["get-sum", "*write*", "*delete*"]
+
+approvals:
+  timeout: 5m                          # pending calls auto-reject after this
+  api_token: ${MCPPROXY_APPROVAL_TOKEN}  # guards /approvals/*; empty = open (dev only)

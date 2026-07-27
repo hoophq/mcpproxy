@@ -1,0 +1,20 @@
+# Minimal config: one local stdio MCP server, no auth, no policy.
+# The gateway spawns the command per session and kills it (whole process
+# group) when the session ends.
+#
+#   mcpproxyd -config examples/01-minimal-stdio.yaml
+#   mcpsmoke  -url http://127.0.0.1:8000/mcp -tool echo -args '{"message":"hi"}'
+
+listen: 127.0.0.1:8000
+
+inbound:
+  mode: anonymous
+
+backends:
+  everything:
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything"]
+    # Environment for the child process, layered over the daemon's env.
+    # Values support ${VAR} expansion — secrets stay out of the file.
+    env:
+      EXAMPLE_API_KEY: ${EXAMPLE_API_KEY}

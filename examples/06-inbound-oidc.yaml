@@ -1,0 +1,36 @@
+# Inbound OIDC: callers must present a JWT issued by your IdP.
+#
+# The gateway discovers the issuer's JWKS and validates signature, expiry,
+# audience, and required scopes per request. Identity (sub, email) flows
+# into every audit event.
+#
+#   curl -H "Authorization: Bearer $JWT" http://127.0.0.1:8000/mcp …
+#
+# Unauthenticated MCP clients can discover how to authenticate: the gateway
+# serves RFC 9728 protected-resource metadata at
+# /.well-known/oauth-protected-resource pointing at the issuer.
+
+listen: 127.0.0.1:8000
+
+inbound:
+  mode: oidc
+  issuer: https://accounts.google.com   # any OIDC issuer: Okta, Auth0, Keycloak…
+  audience: mcpproxy                    # empty = skip audience check
+  scopes: ["mcp.use"]                   # required scopes; empty = none required
+
+backends:
+  everything:
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything"]
+
+# Other simple inbound modes:
+#
+# inbound:
+#   mode: static                        # one shared bearer token
+#   token: ${MCPPROXY_TOKEN}
+#
+# inbound:
+#   mode: local                         # identity = OS user running the daemon
+#
+# inbound:
+#   mode: anonymous                     # no auth (dev only)

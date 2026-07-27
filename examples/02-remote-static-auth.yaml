@@ -1,0 +1,25 @@
+# Remote MCP server with a static credential (API key / personal access
+# token). Works for any provider that accepts a fixed header — the simplest
+# outbound auth mode.
+
+listen: 127.0.0.1:8000
+
+inbound:
+  mode: anonymous
+
+backends:
+  context7:
+    transport: streamable-http
+    url: https://mcp.context7.com/mcp
+    auth: static           # credential comes from headers below
+    headers:
+      # Any header works; Authorization is just the common case.
+      Authorization: Bearer ${CONTEXT7_API_KEY}
+
+  # A provider that uses a custom header instead:
+  # custom:
+  #   transport: streamable-http
+  #   url: https://mcp.example.com/mcp
+  #   auth: static
+  #   headers:
+  #     X-Api-Key: ${EXAMPLE_KEY}

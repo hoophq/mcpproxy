@@ -1,0 +1,35 @@
+# Observability: Prometheus metrics, OTLP traces, session recording, and
+# semantic tool filtering.
+
+listen: 127.0.0.1:8000
+
+inbound:
+  mode: anonymous
+
+backends:
+  everything:
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything"]
+
+telemetry:
+  # Exposes GET /metrics:
+  #   mcpproxy_messages_total{direction,backend,method,tool,decision}
+  #   mcpproxy_message_duration_seconds{direction,backend,method}
+  #   mcpproxy_sessions_active
+  prometheus_path: /metrics
+  # OTLP gRPC trace export (e.g. an otel-collector or Jaeger):
+  otlp_endpoint: 127.0.0.1:4317
+  service_name: mcpproxyd
+
+# Session recording: one append-only JSONL file per session with every
+# audit event (tool_call, tool_denied, tools_changed, approval_*, …).
+# Replay:  jq -r '[.time,.event,.tool//""] | @tsv' sessions/<sid>.jsonl
+wal_dir: ./sessions
+
+# Semantic tool filtering: expose only the top_k tools most relevant to
+# `purpose` in tools/list responses (lexical scorer; embedding scorers can
+# be plugged in when embedding the gateway). Shrinks the model's tool
+# catalog = fewer tokens per request.
+optimizer:
+  top_k: 8
+  purpose: "read files and search documentation"

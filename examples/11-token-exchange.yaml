@@ -1,0 +1,29 @@
+# RFC 8693 token exchange: instead of running an authorization flow, the
+# gateway exchanges the CALLER's inbound token for an upstream token at the
+# IdP's token endpoint. Zero user interaction; the MCP server sees a
+# credential scoped to the actual user.
+#
+# Requirements:
+#   - inbound mode presenting a real IdP token (oidc), and
+#   - an IdP with token exchange enabled and a trust policy allowing this
+#     client to exchange for the target audience (Keycloak supports it out
+#     of the box; Okta/Entra need configuration).
+
+listen: 127.0.0.1:8000
+
+inbound:
+  mode: oidc
+  issuer: https://keycloak.example.com/realms/main
+  audience: mcpproxy
+
+backends:
+  internal-tools:
+    transport: streamable-http
+    url: https://mcp.internal.example.com/mcp
+    auth: oauth
+    oauth:
+      token_exchange: true
+      issuer: https://keycloak.example.com/realms/main
+      client_id: ${EXCHANGE_CLIENT_ID}
+      client_secret: ${EXCHANGE_CLIENT_SECRET}
+      scopes: ["mcp-backend"]

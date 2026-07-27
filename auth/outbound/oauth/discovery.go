@@ -4,8 +4,6 @@
 //
 // Every entry point is stdlib-only and takes an explicit *http.Client so tests
 // can point the whole stack at an httptest server.
-//
-// Portions adapted from ToolHive (github.com/stacklok/toolhive), Apache-2.0.
 package oauth
 
 import (
@@ -58,8 +56,6 @@ type Challenge struct {
 // Only the token-based schemes matter here: a Basic or Digest challenge from an
 // MCP server means the operator configured the wrong auth mode, and reporting
 // that plainly beats a vague parse failure.
-//
-// Portions adapted from ToolHive (github.com/stacklok/toolhive), Apache-2.0.
 func ParseWWWAuthenticate(header string) (*Challenge, error) {
 	header = strings.TrimSpace(header)
 	if header == "" {

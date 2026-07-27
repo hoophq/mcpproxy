@@ -1,0 +1,101 @@
+# Kitchen sink: every option in one place. Not a recommended deployment —
+# a reference. See 01–12 for focused examples.
+
+listen: 127.0.0.1:8000
+
+# ---------------------------------------------------------------- inbound --
+# Exactly one mode. auth_server (below) overrides inbound entirely.
+inbound:
+  mode: oidc                       # anonymous | local | static | oidc | github | awssts
+  issuer: https://idp.example.com
+  audience: mcpproxy
+  scopes: ["mcp.use"]
+  # token: ${MCPPROXY_TOKEN}       # mode: static
+  # github_allowed_orgs: ["acme"]  # mode: github
+  # aws_role_mappings:             # mode: awssts
+  #   "arn:aws:sts::123:assumed-role/dev/*": "aws:{role}:{session}"
+
+# --------------------------------------------------------------- backends --
+# 1 backend = plain proxy. 2+ = aggregation: tools prefixed "<name>_".
+backends:
+  local:
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything"]
+    env:
+      SOME_KEY: ${SOME_KEY}
+
+  keyed:
+    transport: streamable-http
+    url: https://mcp.vendor-a.com/mcp
+    auth: static
+    headers:
+      Authorization: Bearer ${VENDOR_A_KEY}
+
+  byo-token:
+    transport: streamable-http
+    url: https://mcp.vendor-b.com/mcp
+    auth: passthrough              # caller sends X-Mcpproxy-Upstream-Authorization
+
+  oauthd:
+    transport: streamable-http
+    url: https://mcp.vendor-c.com/mcp
+    auth: oauth                    # discovery + DCR + PKCE + refresh
+    oauth:
+      # All optional; omit for full auto-discovery.
+      issuer: https://auth.vendor-c.com
+      client_id: ${VC_CLIENT_ID}
+      client_secret: ${VC_CLIENT_SECRET}
+      scopes: ["mcp"]
+      per_user: true               # grants keyed (backend, caller) instead of (backend)
+      # token_exchange: true       # RFC 8693 instead of the interactive flow
+    policy:                        # per-backend policy override (field-wise)
+      allowed_tools: ["search*", "get*"]
+
+# ----------------------------------------------------------------- policy --
+policy:
+  allowed_tools: []                # empty = all (minus denied)
+  denied_tools: ["*delete*", "*env*"]
+  approval_tools: ["*write*"]      # held for human review
+  block_sampling: true             # server→LLM requests (default true)
+  block_elicitation: true          # server→user prompts (default true)
+  on_rug_pull: kill                # kill | alert
+  max_calls_per_session: 500
+  max_result_kb: 512
+  tool_rate_limits:
+    "search*": 60
+  overrides:
+    local_echo:
+      name: say
+      description: "Returns the input unchanged."
+
+# -------------------------------------------------------------- approvals --
+approvals:
+  timeout: 10m
+  api_token: ${MCPPROXY_APPROVAL_TOKEN}
+
+# -------------------------------------------------------------- telemetry --
+telemetry:
+  prometheus_path: /metrics
+  otlp_endpoint: 127.0.0.1:4317
+  service_name: mcpproxyd
+
+# ------------------------------------------------------ session recording --
+wal_dir: /var/lib/mcpproxy/sessions
+
+# ---------------------------------------------------- embedded auth server --
+# Uncomment to let MCP clients OAuth against the gateway itself (replaces
+# `inbound`). See 10-auth-server.yaml.
+# auth_server:
+#   issuer: https://gw.example.com
+#   signing_key_file: /var/lib/mcpproxy/authserver.pem
+#   access_token_ttl: 1h
+#   upstream:
+#     issuer: https://idp.example.com
+#     client_id: ${IDP_CLIENT_ID}
+#     client_secret: ${IDP_CLIENT_SECRET}
+#     scopes: ["openid", "email"]
+
+# ---------------------------------------------------------------- optimizer --
+optimizer:
+  top_k: 12
+  purpose: "search vendor documentation and manage files"

@@ -1,0 +1,46 @@
+# Outbound OAuth: the gateway authenticates TO a remote MCP server with the
+# full MCP authorization flow:
+#
+#   1. Probe → 401 + WWW-Authenticate → RFC 9728 resource metadata
+#   2. RFC 8414 authorization-server metadata discovery
+#   3. RFC 7591 dynamic client registration (when no client_id configured)
+#   4. PKCE authorization-code flow — the daemon prints the authorize URL
+#      and listens on a 127.0.0.1 loopback port for the callback
+#   5. Token persisted (AES-GCM under $MCPPROXY_STATE_DIR, default
+#      ~/.mcpproxy) and auto-refreshed with a 30s early margin
+#
+# Everything below `auth: oauth` is optional — omit `oauth:` entirely for
+# full auto-discovery + DCR.
+
+listen: 127.0.0.1:8000
+
+inbound:
+  mode: anonymous
+
+backends:
+  # Fully automatic: discovery + dynamic client registration.
+  linear:
+    transport: streamable-http
+    url: https://mcp.linear.app/mcp
+    auth: oauth
+
+  # Manual client (provider requires pre-registered apps):
+  # notion:
+  #   transport: streamable-http
+  #   url: https://mcp.notion.com/mcp
+  #   auth: oauth
+  #   oauth:
+  #     issuer: https://auth.notion.com          # skip discovery
+  #     client_id: ${NOTION_CLIENT_ID}
+  #     client_secret: ${NOTION_CLIENT_SECRET}
+  #     scopes: ["read", "write"]
+
+  # Per-user grants: tokens keyed by (backend, caller identity) instead of
+  # one shared grant. Each user authorizes once; requires an inbound mode
+  # that actually identifies users (oidc/github/awssts).
+  # linear_per_user:
+  #   transport: streamable-http
+  #   url: https://mcp.linear.app/mcp
+  #   auth: oauth
+  #   oauth:
+  #     per_user: true
