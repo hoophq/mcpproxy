@@ -1,8 +1,8 @@
 # Aggregation: several MCP servers behind one endpoint (mini virtual-MCP).
 #
-# With more than one backend, the merged catalog prefixes every tool with
+# With more than one backend, the gateway prefixes each tool with
 # "<backend>_": the client sees "docs_search", "files_read_file", … and the
-# gateway strips the prefix when routing the call to the owning backend.
+# gateway strips the prefix when routing a call to the owning backend.
 # initialize and notifications fan out to every backend.
 
 listen: 127.0.0.1:8000

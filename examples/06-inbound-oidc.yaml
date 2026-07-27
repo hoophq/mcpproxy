@@ -1,14 +1,14 @@
 # Inbound OIDC: callers must present a JWT issued by your IdP.
 #
 # The gateway discovers the issuer's JWKS and validates signature, expiry,
-# audience, and required scopes per request. Identity (sub, email) flows
-# into every audit event.
+# audience, and required scopes per request. Every audit event carries the
+# caller identity (sub, email).
 #
 #   curl -H "Authorization: Bearer $JWT" http://127.0.0.1:8000/mcp …
 #
-# Unauthenticated MCP clients can discover how to authenticate: the gateway
-# serves RFC 9728 protected-resource metadata at
-# /.well-known/oauth-protected-resource pointing at the issuer.
+# The gateway serves RFC 9728 protected-resource metadata at
+# /.well-known/oauth-protected-resource pointing at the issuer, so an
+# unauthenticated MCP client learns where to authenticate.
 
 listen: 127.0.0.1:8000
 
@@ -23,7 +23,7 @@ backends:
     transport: stdio
     command: ["npx", "-y", "@modelcontextprotocol/server-everything"]
 
-# Other simple inbound modes:
+# Other inbound modes:
 #
 # inbound:
 #   mode: static                        # one shared bearer token

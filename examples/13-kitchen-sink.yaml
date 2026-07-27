@@ -1,10 +1,10 @@
-# Kitchen sink: every option in one place. Not a recommended deployment —
-# a reference. See 01–12 for focused examples.
+# Kitchen sink: every option in one place. Read it as a reference and
+# copy from the focused examples in 01 to 12.
 
 listen: 127.0.0.1:8000
 
 # ---------------------------------------------------------------- inbound --
-# Exactly one mode. auth_server (below) overrides inbound entirely.
+# Exactly one mode. auth_server (below) replaces inbound.
 inbound:
   mode: oidc                       # anonymous | local | static | oidc | github | awssts
   issuer: https://idp.example.com
@@ -41,7 +41,7 @@ backends:
     url: https://mcp.vendor-c.com/mcp
     auth: oauth                    # discovery + DCR + PKCE + refresh
     oauth:
-      # All optional; omit for full auto-discovery.
+      # All optional. Omit for full auto-discovery.
       issuer: https://auth.vendor-c.com
       client_id: ${VC_CLIENT_ID}
       client_secret: ${VC_CLIENT_SECRET}

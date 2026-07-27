@@ -12,7 +12,7 @@ inbound:
   # audience: mcpproxy
 
 # Backends: one entry = plain proxy; several = aggregation
-# (tools exposed as "<name>_<tool>").
+# (the gateway exposes tools as "<name>_<tool>").
 backends:
   everything:
     transport: stdio

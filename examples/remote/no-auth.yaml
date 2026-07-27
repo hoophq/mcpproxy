@@ -14,7 +14,7 @@ backends:
     url: https://mcp.deepwiki.com/mcp
     auth: none
 
-  # Anonymous mode works; add a token for private-repo access (see
+  # Anonymous works here. Add a token for private-repo access (see
   # static-token.yaml).
   huggingface:
     transport: streamable-http

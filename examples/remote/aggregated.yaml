@@ -1,10 +1,10 @@
-# One endpoint for the whole team: several remote providers aggregated,
-# mixed auth modes, per-backend policy. Clients configure a single MCP
-# server and see linear_*, github_*, deepwiki_* tools.
+# One endpoint for the team: several remote providers aggregated, mixed
+# auth modes, per-backend policy. A client configures a single MCP server
+# and sees linear_*, github_*, deepwiki_* tools.
 
 listen: 127.0.0.1:8000
 
-# Identify callers so audit events and per-user grants mean something.
+# Identify callers so audit events and per-user grants name a person.
 inbound:
   mode: oidc
   issuer: https://accounts.google.com

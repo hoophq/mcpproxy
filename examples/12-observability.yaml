@@ -21,15 +21,15 @@ telemetry:
   otlp_endpoint: 127.0.0.1:4317
   service_name: mcpproxyd
 
-# Session recording: one append-only JSONL file per session with every
+# Session recording: one append-only JSONL file per session holding each
 # audit event (tool_call, tool_denied, tools_changed, approval_*, …).
 # Replay:  jq -r '[.time,.event,.tool//""] | @tsv' sessions/<sid>.jsonl
 wal_dir: ./sessions
 
-# Semantic tool filtering: expose only the top_k tools most relevant to
-# `purpose` in tools/list responses (lexical scorer; embedding scorers can
-# be plugged in when embedding the gateway). Shrinks the model's tool
-# catalog = fewer tokens per request.
+# Semantic tool filtering: tools/list returns only the top_k tools most
+# relevant to `purpose` (lexical scorer; plug in an embedding scorer when
+# embedding the gateway). A smaller tool catalog costs fewer tokens per
+# request.
 optimizer:
   top_k: 8
   purpose: "read files and search documentation"

@@ -1,7 +1,7 @@
 # Remote MCP servers behind OAuth. mcpproxy runs the full MCP authorization
-# flow automatically: 401 → RFC 9728/8414 discovery → RFC 7591 dynamic
-# client registration → PKCE (the daemon prints an authorize URL; open it,
-# approve, done) → token stored encrypted under ~/.mcpproxy and refreshed.
+# flow for you: 401 → RFC 9728/8414 discovery → RFC 7591 dynamic client
+# registration → PKCE (the daemon prints an authorize URL; open it and
+# approve) → token stored encrypted under ~/.mcpproxy and refreshed.
 #
 #   mcpproxyd -config examples/remote/oauth.yaml
 #   mcpsmoke  -url http://127.0.0.1:8000/mcp -list-only
@@ -30,7 +30,7 @@ backends:
 
   # Per-user grants: each caller authorizes once with their own account;
   # tokens keyed (backend, user). Needs an inbound mode that identifies
-  # users — anonymous would collapse everyone into one grant.
+  # users, since anonymous collapses all callers into one grant.
   # paypal:
   #   transport: streamable-http
   #   url: https://mcp.paypal.com/mcp

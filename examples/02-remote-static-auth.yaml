@@ -1,6 +1,6 @@
 # Remote MCP server with a static credential (API key / personal access
-# token). Works for any provider that accepts a fixed header — the simplest
-# outbound auth mode.
+# token). The simplest outbound auth mode: works for any provider that
+# accepts a fixed header.
 
 listen: 127.0.0.1:8000
 
@@ -13,7 +13,7 @@ backends:
     url: https://mcp.context7.com/mcp
     auth: static           # credential comes from headers below
     headers:
-      # Any header works; Authorization is just the common case.
+      # Any header works; Authorization is the common case.
       Authorization: Bearer ${CONTEXT7_API_KEY}
 
   # A provider that uses a custom header instead:

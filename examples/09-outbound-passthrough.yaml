@@ -3,8 +3,8 @@
 # promotes it to the backend's Authorization header; the gateway itself
 # stores no upstream tokens.
 #
-# This is per-user upstream identity without any OAuth machinery — useful
-# when the MCP client already manages tokens for the upstream service.
+# Per-user upstream identity without OAuth machinery. Useful when the MCP
+# client already manages tokens for the upstream service.
 #
 #   curl http://127.0.0.1:8000/mcp \
 #     -H "Authorization: Bearer $GATEWAY_TOKEN" \

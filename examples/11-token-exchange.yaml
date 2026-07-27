@@ -1,7 +1,7 @@
-# RFC 8693 token exchange: instead of running an authorization flow, the
-# gateway exchanges the CALLER's inbound token for an upstream token at the
-# IdP's token endpoint. Zero user interaction; the MCP server sees a
-# credential scoped to the actual user.
+# RFC 8693 token exchange: the gateway trades the CALLER's inbound token
+# for an upstream token at the IdP's token endpoint, skipping the
+# authorization flow. Zero user interaction; the MCP server sees a
+# credential scoped to that user.
 #
 # Requirements:
 #   - inbound mode presenting a real IdP token (oidc), and

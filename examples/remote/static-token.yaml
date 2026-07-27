@@ -1,6 +1,5 @@
 # Remote MCP servers authenticated with a static API key / personal access
-# token. Cheapest way to reach providers that also offer OAuth: skip the
-# flow, use a PAT.
+# token. For a provider that also offers OAuth, a PAT skips the flow.
 #
 #   STRIPE_KEY=sk_test_… GITHUB_PAT=ghp_… \
 #     mcpproxyd -config examples/remote/static-token.yaml
@@ -33,7 +32,7 @@ backends:
       CONTEXT7_API_KEY: ${CONTEXT7_API_KEY}
 
 policy:
-  # Payments demand guardrails: hold refund/payment mutations for review.
+  # Payments need guardrails: hold refund/payment mutations for review.
   approval_tools: ["stripe_*create*", "stripe_*update*", "stripe_*cancel*"]
   denied_tools: []
 

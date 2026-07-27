@@ -5,9 +5,9 @@ listen: 127.0.0.1:8000
 
 # --- GitHub mode -----------------------------------------------------------
 # The caller sends its GitHub token; the gateway validates it against the
-# GitHub API (GET /user) and optionally requires membership in one of the
-# listed orgs. Identity: subject = GitHub login. Validated identities are
-# cached for 5 minutes.
+# GitHub API (GET /user) and can require membership in one of the listed
+# orgs. Identity: subject = GitHub login. The gateway caches validated
+# identities for 5 minutes.
 inbound:
   mode: github
   github_allowed_orgs: ["hoophq"]    # empty = any valid token

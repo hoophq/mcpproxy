@@ -9,12 +9,12 @@
 #                  static  provider issues an API key / PAT; `header` names
 #                          the header and ${ENV} placeholder to use
 #                  oauth   provider requires the MCP authorization flow
-#                          (discovery + DCR + PKCE — automatic on first use)
+#                          (discovery + DCR + PKCE, run on first use)
 #   header       for auth=static: "Header-Name: value template"
-#   notes        caveats worth knowing before enabling
+#   notes        caveats to read before enabling
 #
-# URLs and auth requirements drift as providers evolve; verify against the
-# provider's docs when a probe fails.
+# Providers change URLs and auth requirements; check the provider's docs
+# when a probe fails.
 
 servers:
   atlassian:

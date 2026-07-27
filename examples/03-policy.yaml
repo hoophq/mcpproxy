@@ -1,11 +1,11 @@
 # Policy: tool allow/deny, budgets, rug-pull handling, catalog overrides.
 #
 # Enforcement is two-sided:
-#   - tools/list responses are FILTERED: denied / non-allowlisted tools are
-#     removed before the model ever sees them.
-#   - tools/call requests are checked against the same rules (an alias
-#     introduced by `overrides` cannot launder a denied tool), and calls to
-#     tools the server never advertised are refused.
+#   - tools/list responses are FILTERED: the gateway strips denied and
+#     non-allowlisted tools before the model sees them.
+#   - tools/call requests hit the same rules (an alias introduced by
+#     `overrides` cannot launder a denied tool), and the gateway refuses
+#     calls to tools the server never advertised.
 
 listen: 127.0.0.1:8000
 
@@ -23,19 +23,19 @@ policy:
   allowed_tools: ["echo", "get-*"]
   denied_tools: ["get-env", "*delete*"]
 
-  # What to do when a tool's description or input schema changes
+  # Handling for a tool whose description or input schema changes
   # mid-session (the "rug pull" attack): kill (default) ends the session;
   # alert only emits an mcp.tools_changed audit event.
   on_rug_pull: kill
 
   # Server-initiated requests toward your LLM/user. Both default to true
-  # (denied). Set false explicitly to allow them.
+  # (denied). Set false to allow them.
   block_sampling: true
   block_elicitation: true
 
   # Budgets. 0 = unlimited.
   max_calls_per_session: 100     # hard cap per session (CodeBudgetExceeded after)
-  max_result_kb: 256             # larger tool results are truncated + audited
+  max_result_kb: 256             # gateway truncates + audits larger results
   tool_rate_limits:              # calls per minute, per tool glob
     "get-*": 30
 

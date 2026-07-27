@@ -1,7 +1,8 @@
 # Approvals: hold matching tool calls until a human resolves them.
 #
 # The client's tools/call blocks (MCP clients tolerate slow tools); a
-# reviewer approves or rejects over the REST API. Expiry rejects.
+# reviewer approves or rejects over the REST API. The gateway rejects a
+# call that outlives the timeout.
 #
 # Walkthrough:
 #   mcpproxyd -config examples/04-approvals.yaml &
@@ -27,10 +28,10 @@ backends:
     command: ["npx", "-y", "@modelcontextprotocol/server-everything"]
 
 policy:
-  # Every tool matching these globs requires approval. Combine with
+  # Tools matching these globs require approval. Combine with
   # denied_tools: deny wins, approval applies to what remains.
   approval_tools: ["get-sum", "*write*", "*delete*"]
 
 approvals:
-  timeout: 5m                          # pending calls auto-reject after this
+  timeout: 5m                          # the gateway rejects pending calls after this
   api_token: ${MCPPROXY_APPROVAL_TOKEN}  # guards /approvals/*; empty = open (dev only)

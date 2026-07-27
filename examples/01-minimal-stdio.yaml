@@ -15,6 +15,6 @@ backends:
     transport: stdio
     command: ["npx", "-y", "@modelcontextprotocol/server-everything"]
     # Environment for the child process, layered over the daemon's env.
-    # Values support ${VAR} expansion — secrets stay out of the file.
+    # Values support ${VAR} expansion, so secrets stay out of the file.
     env:
       EXAMPLE_API_KEY: ${EXAMPLE_API_KEY}
