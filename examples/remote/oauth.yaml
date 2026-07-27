@@ -1,0 +1,43 @@
+# Remote MCP servers behind OAuth. mcpproxy runs the full MCP authorization
+# flow automatically: 401 → RFC 9728/8414 discovery → RFC 7591 dynamic
+# client registration → PKCE (the daemon prints an authorize URL; open it,
+# approve, done) → token stored encrypted under ~/.mcpproxy and refreshed.
+#
+#   mcpproxyd -config examples/remote/oauth.yaml
+#   mcpsmoke  -url http://127.0.0.1:8000/mcp -list-only
+#   # first call prints: "authorize at: https://linear.app/oauth/…"
+
+listen: 127.0.0.1:8000
+
+inbound:
+  mode: anonymous
+
+backends:
+  linear:
+    transport: streamable-http
+    url: https://mcp.linear.app/mcp
+    auth: oauth
+
+  notion:
+    transport: streamable-http
+    url: https://mcp.notion.com/mcp
+    auth: oauth
+
+  sentry:
+    transport: streamable-http
+    url: https://mcp.sentry.dev/mcp
+    auth: oauth
+
+  # Per-user grants: each caller authorizes once with their own account;
+  # tokens keyed (backend, user). Needs an inbound mode that identifies
+  # users — anonymous would collapse everyone into one grant.
+  # paypal:
+  #   transport: streamable-http
+  #   url: https://mcp.paypal.com/mcp
+  #   auth: oauth
+  #   oauth:
+  #     per_user: true
+
+policy:
+  denied_tools: ["*delete*"]
+  on_rug_pull: kill

@@ -1,0 +1,26 @@
+# Remote MCP servers that require no credentials.
+#
+#   mcpproxyd -config examples/remote/no-auth.yaml
+#   mcpsmoke  -url http://127.0.0.1:8000/mcp -list-only
+
+listen: 127.0.0.1:8000
+
+inbound:
+  mode: anonymous
+
+backends:
+  deepwiki:
+    transport: streamable-http
+    url: https://mcp.deepwiki.com/mcp
+    auth: none
+
+  # Anonymous mode works; add a token for private-repo access (see
+  # static-token.yaml).
+  huggingface:
+    transport: streamable-http
+    url: https://huggingface.co/mcp
+    auth: none
+
+# Two backends = aggregation: tools arrive as deepwiki_*, huggingface_*.
+policy:
+  max_calls_per_session: 100

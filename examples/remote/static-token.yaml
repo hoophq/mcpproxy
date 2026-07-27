@@ -1,0 +1,42 @@
+# Remote MCP servers authenticated with a static API key / personal access
+# token. Cheapest way to reach providers that also offer OAuth: skip the
+# flow, use a PAT.
+#
+#   STRIPE_KEY=sk_test_… GITHUB_PAT=ghp_… \
+#     mcpproxyd -config examples/remote/static-token.yaml
+
+listen: 127.0.0.1:8000
+
+inbound:
+  mode: anonymous
+
+backends:
+  stripe:
+    transport: streamable-http
+    url: https://mcp.stripe.com
+    auth: static
+    headers:
+      Authorization: Bearer ${STRIPE_KEY}     # use a restricted key, not the live secret key
+
+  github:
+    transport: streamable-http
+    url: https://api.githubcopilot.com/mcp/
+    auth: static
+    headers:
+      Authorization: Bearer ${GITHUB_PAT}     # fine-grained PAT scoped to what agents need
+
+  context7:
+    transport: streamable-http
+    url: https://mcp.context7.com/mcp
+    auth: static
+    headers:
+      CONTEXT7_API_KEY: ${CONTEXT7_API_KEY}
+
+policy:
+  # Payments demand guardrails: hold refund/payment mutations for review.
+  approval_tools: ["stripe_*create*", "stripe_*update*", "stripe_*cancel*"]
+  denied_tools: []
+
+approvals:
+  timeout: 10m
+  api_token: ${MCPPROXY_APPROVAL_TOKEN}

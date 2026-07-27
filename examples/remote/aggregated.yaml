@@ -1,0 +1,48 @@
+# One endpoint for the whole team: several remote providers aggregated,
+# mixed auth modes, per-backend policy. Clients configure a single MCP
+# server and see linear_*, github_*, deepwiki_* tools.
+
+listen: 127.0.0.1:8000
+
+# Identify callers so audit events and per-user grants mean something.
+inbound:
+  mode: oidc
+  issuer: https://accounts.google.com
+  audience: mcpproxy
+
+backends:
+  linear:
+    transport: streamable-http
+    url: https://mcp.linear.app/mcp
+    auth: oauth
+    oauth:
+      per_user: true          # each teammate authorizes their own Linear account
+
+  github:
+    transport: streamable-http
+    url: https://api.githubcopilot.com/mcp/
+    auth: static
+    headers:
+      Authorization: Bearer ${GITHUB_PAT}
+    policy:
+      allowed_tools: ["*list*", "*get*", "*search*"]   # read-only GitHub
+
+  deepwiki:
+    transport: streamable-http
+    url: https://mcp.deepwiki.com/mcp
+    auth: none
+
+policy:
+  approval_tools: ["linear_*delete*"]
+  max_calls_per_session: 300
+  max_result_kb: 512
+
+approvals:
+  timeout: 10m
+  api_token: ${MCPPROXY_APPROVAL_TOKEN}
+
+telemetry:
+  prometheus_path: /metrics
+  service_name: mcpproxy-team
+
+wal_dir: ./sessions
