@@ -6,10 +6,14 @@ this file.
 
 Notes before you pick one:
 
-- mcpproxy's remote backend speaks **streamable-HTTP** (`POST /mcp`, JSON or
-  SSE responses). Endpoints listed as *SSE transport* use the older
-  `GET /sse` + `POST /messages` protocol and are NOT supported yet — they're
-  listed for completeness and marked ⚠.
+- Both remote transports are supported: **streamable-HTTP**
+  (`transport: streamable-http`) and the legacy **HTTP+SSE** protocol
+  (`transport: sse`, marked ⚠ below — set the transport accordingly).
+- All of these ship in the built-in catalog ([`catalog/catalog.yaml`](../../catalog/catalog.yaml)):
+  `import-catalog -list` shows them, `import-catalog linear stripe …`
+  emits ready-made backend stanzas. `-catalog <file>` loads a custom YAML
+  catalog with the same schema; `-dir <dir>` imports from a tree of
+  MCP-registry `server.json` files.
 - `auth: oauth` endpoints run discovery + dynamic client registration +
   PKCE; the daemon prints the authorize URL on first use. Many of these
   providers also issue static tokens (PATs) usable with `auth: static`.
@@ -20,7 +24,7 @@ Notes before you pick one:
 | Provider | URL | Notes |
 |---|---|---|
 | DeepWiki | `https://mcp.deepwiki.com/mcp` | GitHub repo Q&A |
-| Cloudflare Docs | `https://docs.mcp.cloudflare.com/sse` | ⚠ SSE transport |
+| Cloudflare Docs | `https://docs.mcp.cloudflare.com/sse` | ⚠ `transport: sse` |
 | Hugging Face | `https://huggingface.co/mcp` | anonymous works; HF token adds private access |
 
 Config: [`no-auth.yaml`](no-auth.yaml)
@@ -45,14 +49,14 @@ Config: [`static-token.yaml`](static-token.yaml)
 | Notion | `https://mcp.notion.com/mcp` | |
 | Sentry | `https://mcp.sentry.dev/mcp` | |
 | GitHub | `https://api.githubcopilot.com/mcp/` | OAuth or PAT |
-| Neon | `https://mcp.neon.tech/sse` | ⚠ SSE transport |
-| Atlassian (Jira/Confluence) | `https://mcp.atlassian.com/v1/sse` | ⚠ SSE transport |
-| Asana | `https://mcp.asana.com/sse` | ⚠ SSE transport |
-| Intercom | `https://mcp.intercom.com/sse` | ⚠ SSE transport |
+| Neon | `https://mcp.neon.tech/sse` | ⚠ `transport: sse` |
+| Atlassian (Jira/Confluence) | `https://mcp.atlassian.com/v1/sse` | ⚠ `transport: sse` |
+| Asana | `https://mcp.asana.com/sse` | ⚠ `transport: sse` |
+| Intercom | `https://mcp.intercom.com/sse` | ⚠ `transport: sse` |
 | PayPal | `https://mcp.paypal.com/mcp` | |
-| Square | `https://mcp.squareup.com/sse` | ⚠ SSE transport |
-| Webflow | `https://mcp.webflow.com/sse` | ⚠ SSE transport |
-| Cloudflare (bindings) | `https://bindings.mcp.cloudflare.com/sse` | ⚠ SSE transport |
+| Square | `https://mcp.squareup.com/sse` | ⚠ `transport: sse` |
+| Webflow | `https://mcp.webflow.com/sse` | ⚠ `transport: sse` |
+| Cloudflare (bindings) | `https://bindings.mcp.cloudflare.com/sse` | ⚠ `transport: sse` |
 
 Config: [`oauth.yaml`](oauth.yaml)
 

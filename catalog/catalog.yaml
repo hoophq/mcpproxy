@@ -1,0 +1,223 @@
+# Built-in catalog of publicly hosted remote MCP servers.
+#
+# Fields:
+#   description  one-line summary
+#   url          MCP endpoint
+#   transport    streamable-http | sse   (sse = legacy HTTP+SSE protocol)
+#   auth         none | static | oauth
+#                  none    no credential needed (or optional)
+#                  static  provider issues an API key / PAT; `header` names
+#                          the header and ${ENV} placeholder to use
+#                  oauth   provider requires the MCP authorization flow
+#                          (discovery + DCR + PKCE — automatic on first use)
+#   header       for auth=static: "Header-Name: value template"
+#   notes        caveats worth knowing before enabling
+#
+# URLs and auth requirements drift as providers evolve; verify against the
+# provider's docs when a probe fails.
+
+servers:
+  atlassian:
+    description: Jira, Confluence, and Compass (official)
+    url: https://mcp.atlassian.com/v1/sse
+    transport: sse
+    auth: oauth
+
+  aws-knowledge:
+    description: AWS documentation and knowledge base
+    url: https://knowledge-mcp.global.api.aws
+    transport: streamable-http
+    auth: none
+
+  box:
+    description: Box content management (official)
+    url: https://mcp.box.com
+    transport: streamable-http
+    auth: oauth
+
+  canva:
+    description: Canva design tools (official)
+    url: https://mcp.canva.com/mcp
+    transport: streamable-http
+    auth: oauth
+
+  cloudflare:
+    description: Cloudflare account tooling (official)
+    url: https://mcp.cloudflare.com/mcp
+    transport: streamable-http
+    auth: oauth
+
+  cloudflare-docs:
+    description: Cloudflare documentation search (official)
+    url: https://docs.mcp.cloudflare.com/sse
+    transport: sse
+    auth: none
+
+  context7:
+    description: Library documentation lookup
+    url: https://mcp.context7.com/mcp
+    transport: streamable-http
+    auth: static
+    header: "CONTEXT7_API_KEY: ${CONTEXT7_API_KEY}"
+    notes: anonymous access works with reduced rate limits
+
+  datadog:
+    description: Datadog observability (official)
+    url: https://mcp.datadoghq.com/api/unstable/mcp-server/mcp
+    transport: streamable-http
+    auth: static
+    header: "Authorization: Bearer ${DATADOG_API_KEY}"
+    notes: endpoint is marked unstable by the provider
+
+  excalidraw:
+    description: Excalidraw diagram generation
+    url: https://mcp.excalidraw.com/mcp
+    transport: streamable-http
+    auth: none
+
+  github:
+    description: GitHub repositories, issues, PRs (official)
+    url: https://api.githubcopilot.com/mcp
+    transport: streamable-http
+    auth: static
+    header: "Authorization: Bearer ${GITHUB_PAT}"
+    notes: OAuth also supported; a fine-grained PAT is the simplest setup
+
+  gitlab:
+    description: GitLab projects and merge requests (official)
+    url: https://gitlab.com/api/v4/mcp
+    transport: streamable-http
+    auth: static
+    header: "Authorization: Bearer ${GITLAB_PAT}"
+
+  google-maps:
+    description: Google Maps places and directions
+    url: https://mapstools.googleapis.com/mcp
+    transport: streamable-http
+    auth: static
+    header: "X-Goog-Api-Key: ${GOOGLE_MAPS_API_KEY}"
+
+  granola:
+    description: Granola meeting notes
+    url: https://mcp.granola.ai/mcp
+    transport: streamable-http
+    auth: oauth
+
+  hubspot:
+    description: HubSpot CRM (official)
+    url: https://mcp.hubspot.com
+    transport: streamable-http
+    auth: oauth
+
+  huggingface:
+    description: Hugging Face models, datasets, Spaces (official)
+    url: https://huggingface.co/mcp
+    transport: streamable-http
+    auth: none
+    notes: "optional: Authorization: Bearer ${HF_TOKEN} unlocks private assets"
+
+  jam:
+    description: Jam bug reports and recordings (official)
+    url: https://mcp.jam.dev/mcp
+    transport: streamable-http
+    auth: oauth
+
+  kiwi:
+    description: Kiwi.com flight search
+    url: https://mcp.kiwi.com
+    transport: streamable-http
+    auth: none
+
+  linear:
+    description: Linear issues, projects, comments (official)
+    url: https://mcp.linear.app/mcp
+    transport: streamable-http
+    auth: oauth
+    notes: personal API keys also work as a static bearer
+
+  mcp-spec:
+    description: Model Context Protocol specification search
+    url: https://modelcontextprotocol.io/mcp
+    transport: streamable-http
+    auth: none
+
+  mermaid:
+    description: Mermaid chart rendering
+    url: https://mcp.mermaidchart.com/mcp
+    transport: streamable-http
+    auth: oauth
+
+  monday:
+    description: monday.com work management (official)
+    url: https://mcp.monday.com/sse
+    transport: sse
+    auth: oauth
+
+  neon:
+    description: Neon serverless Postgres (official)
+    url: https://mcp.neon.tech/mcp
+    transport: streamable-http
+    auth: oauth
+
+  notion:
+    description: Notion workspaces (official)
+    url: https://mcp.notion.com/mcp
+    transport: streamable-http
+    auth: oauth
+
+  paypal:
+    description: PayPal payments (official)
+    url: https://mcp.paypal.com/mcp
+    transport: streamable-http
+    auth: oauth
+
+  replicate:
+    description: Replicate model inference (official)
+    url: https://mcp.replicate.com/sse
+    transport: sse
+    auth: static
+    header: "Authorization: Bearer ${REPLICATE_API_TOKEN}"
+
+  semgrep:
+    description: Semgrep static analysis (official)
+    url: https://mcp.semgrep.ai/mcp
+    transport: streamable-http
+    auth: none
+
+  sentry:
+    description: Sentry error tracking (official)
+    url: https://mcp.sentry.dev/mcp
+    transport: streamable-http
+    auth: oauth
+
+  slack:
+    description: Slack messaging (official)
+    url: https://mcp.slack.com/mcp
+    transport: streamable-http
+    auth: oauth
+
+  square:
+    description: Square commerce (official)
+    url: https://mcp.squareup.com/sse
+    transport: sse
+    auth: oauth
+
+  stripe:
+    description: Stripe payments (official)
+    url: https://mcp.stripe.com
+    transport: streamable-http
+    auth: static
+    header: "Authorization: Bearer ${STRIPE_KEY}"
+    notes: use a restricted API key; OAuth also supported
+
+  vercel:
+    description: Vercel deployments (official)
+    url: https://mcp.vercel.com
+    transport: streamable-http
+    auth: oauth
+
+  wix:
+    description: Wix site management (official)
+    url: https://mcp.wix.com/mcp
+    transport: streamable-http
+    auth: oauth
