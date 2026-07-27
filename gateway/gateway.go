@@ -191,13 +191,18 @@ func (g *Gateway) startSession(ctx context.Context, identity inspect.Identity) (
 		done:     make(chan struct{}),
 	}
 	c.touch()
+	// Backends live as long as the session, not the initialize request:
+	// ctx here is the POST's request context and cancels the moment the
+	// response is written, which would kill stdio children mid-session.
+	// Session teardown happens explicitly via conn.shutdown.
+	bctx := context.WithoutCancel(ctx)
 	for name, factory := range g.opts.Backends {
-		b, err := factory(ctx)
+		b, err := factory(bctx)
 		if err != nil {
 			c.shutdown(nil)
 			return nil, fmt.Errorf("backend %s: %w", name, err)
 		}
-		if err := b.Start(ctx); err != nil {
+		if err := b.Start(bctx); err != nil {
 			c.shutdown(nil)
 			return nil, fmt.Errorf("starting backend %s: %w", name, err)
 		}
