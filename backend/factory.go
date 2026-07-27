@@ -12,6 +12,10 @@ import (
 const (
 	TransportStdio          = "stdio"
 	TransportStreamableHTTP = "streamable-http"
+	// TransportSSE is the legacy HTTP+SSE transport (2024-11-05): GET
+	// event stream + POST-to-endpoint. Prefer streamable-http; several
+	// hosted servers (Atlassian, Monday, Square…) still require this.
+	TransportSSE = "sse"
 )
 
 // NewFactory returns a Factory building one unstarted Backend per session
@@ -39,6 +43,13 @@ func NewFactory(name string, cfg config.Backend, ts func(ctx context.Context) (s
 				return nil, fmt.Errorf("backend %s: streamable-http transport needs a url", name)
 			}
 			b := NewRemote(name, cfg, slog.Default())
+			b.TokenSource = ts
+			return b, nil
+		case TransportSSE:
+			if cfg.URL == "" {
+				return nil, fmt.Errorf("backend %s: sse transport needs a url", name)
+			}
+			b := NewSSE(name, cfg, slog.Default())
 			b.TokenSource = ts
 			return b, nil
 		default:

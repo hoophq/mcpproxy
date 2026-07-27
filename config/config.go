@@ -200,9 +200,9 @@ func (c *Config) Validate() error {
 			if len(b.Command) == 0 {
 				return fmt.Errorf("backend %q: stdio requires command", name)
 			}
-		case "streamable-http":
+		case "streamable-http", "sse":
 			if b.URL == "" {
-				return fmt.Errorf("backend %q: streamable-http requires url", name)
+				return fmt.Errorf("backend %q: %s requires url", name, b.Transport)
 			}
 		default:
 			return fmt.Errorf("backend %q: unknown transport %q", name, b.Transport)

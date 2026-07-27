@@ -75,6 +75,12 @@ One YAML file. `${ENV_VAR}` references are expanded. Full schema in
 | [12-observability](examples/12-observability.yaml) | Prometheus, OTLP traces, session WAL, optimizer |
 | [13-kitchen-sink](examples/13-kitchen-sink.yaml) | everything at once, commented |
 
+Public remote MCP servers (Linear, Notion, GitHub, Stripe, Sentry, …) with
+ready-to-run configs: [`examples/remote/`](examples/remote/).
+
+Architecture, auth planes, pipeline internals, operations, and embedding
+guide: [`docs/architectural/`](docs/architectural/).
+
 ## HTTP surface
 
 | Endpoint | Purpose |
