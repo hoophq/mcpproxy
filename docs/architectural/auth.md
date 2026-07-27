@@ -1,7 +1,7 @@
 # Authentication architecture
 
-Auth splits into three independent planes. Each is configured separately
-and any combination is valid.
+Auth splits into three independent planes. You configure each one on its
+own, and any combination is valid.
 
 ```
         plane 1: inbound              plane 2: outbound
@@ -12,7 +12,7 @@ client ──────────────▶ gateway ──────�
                                per-user grants, upstream swap)
 ```
 
-## Plane 1 — inbound (who may talk to the gateway)
+## Plane 1: inbound (who may talk to the gateway)
 
 `inbound.mode`, implemented in `auth/inbound`:
 
@@ -26,13 +26,13 @@ client ──────────────▶ gateway ──────�
 | `awssts` | presigned `GetCallerIdentity` URL (validated then executed server-side), ARN→subject glob mappings | mapped subject |
 
 Identity flows into every audit event, review, and per-user token grant.
-With `oidc`, the gateway also serves RFC 9728 protected-resource metadata
+Under `oidc`, the gateway also serves RFC 9728 protected-resource metadata
 so MCP clients can discover the issuer.
 
-When `auth_server` is enabled, plane 1 is replaced: the gateway validates
-its own issued tokens.
+Enabling `auth_server` replaces plane 1: the gateway then validates the
+tokens it issued itself.
 
-## Plane 2 — outbound (how the gateway auths to MCP servers)
+## Plane 2: outbound (how the gateway auths to MCP servers)
 
 `backends.<name>.auth`, implemented in `auth/outbound`:
 
@@ -58,27 +58,28 @@ token endpoint ─────────────────▶ access + r
 
 Design points:
 
-- Public clients send `client_id` in the body, never Basic auth — strict
+- Public clients send `client_id` in the body, never Basic auth. Strict
   OAuth 2.1 servers consume the single-use code while rejecting Basic.
-- `invalid_grant` on refresh deletes the grant (human must re-authorize);
-  5xx does not.
-- Issuer mismatch between metadata URL and document is tolerated; the
-  document's own issuer is trusted (split-origin metadata exists in the
-  wild).
-- `oauth.per_user: true` keys grants by (backend, caller identity) instead
-  of (backend) — each user authorizes once with their own account.
+- `invalid_grant` on refresh deletes the grant, forcing a human to
+  re-authorize; a 5xx leaves it alone.
+- The gateway tolerates an issuer mismatch between the metadata URL and
+  the document, trusting the document's own issuer, because split-origin
+  metadata exists in the wild.
+- `oauth.per_user: true` keys grants by (backend, caller identity) rather
+  than (backend), so each user authorizes once with their own account.
 - `oauth.token_exchange: true` swaps the interactive flow for RFC 8693:
-  exchange the caller's inbound token for an upstream token at the IdP.
-  Zero interaction, but requires IdP-side trust configuration.
+  the gateway exchanges the caller's inbound token for an upstream token
+  at the IdP. That removes the browser step and adds a trust
+  configuration on the IdP side.
 
 Tokens and DCR registrations persist under `$MCPPROXY_STATE_DIR` (default
 `~/.mcpproxy`), encrypted with a generated keyfile.
 
-## Plane 3 — the embedded authorization server
+## Plane 3: the embedded authorization server
 
-`auth_server`, implemented in `auth/authserver`. The gateway becomes an
-OAuth 2.1 AS so MCP clients (Claude Code, Cursor, …) can authenticate with
-zero pre-shared secrets:
+`auth_server`, implemented in `auth/authserver`. The gateway acts as an
+OAuth 2.1 AS, letting MCP clients such as Claude Code and Cursor
+authenticate without a pre-shared secret:
 
 ```
 MCP client ─ 401 ─▶ /.well-known/oauth-authorization-server
@@ -89,20 +90,21 @@ MCP client ─ 401 ─▶ /.well-known/oauth-authorization-server
 ```
 
 - **Without `upstream`**: `/authorize` auto-approves a local dev identity
-  (logged warning). Dev only.
-- **With `upstream`**: login federates to the company IdP; the gateway
+  and logs a warning. Use this in development only.
+- **With `upstream`**: login federates to the company IdP. The gateway
   extracts identity from the ID token, namespaces subjects as
   `<issuer>#<sub>`, and KEEPS the upstream tokens.
 - **Upstream swap**: those stored upstream tokens can serve as outbound
   credentials (`authserver.NewUpstreamSwapSource`), so the MCP server sees
-  the user's own identity — on-behalf-of without RFC 8693.
+  the user's own identity. That gives you on-behalf-of access without
+  RFC 8693.
 
 Security posture: S256 PKCE mandatory, one-time codes (10-min TTL),
-refresh rotation, exact redirect-URI matching, ES256 pinned
-(alg-confusion closed), authorize errors rendered before redirect-URI
-validation (no open redirector). State is memory-only: a restart drops
-codes, refresh tokens, and upstream tokens; the signing key persists only
-when `signing_key_file` is set.
+refresh rotation, exact redirect-URI matching, ES256 pinned to close
+alg-confusion, and authorize errors rendered before redirect-URI
+validation so the endpoint is not an open redirector. The server keeps
+state in memory: a restart drops codes, refresh tokens, and upstream
+tokens. The signing key persists only when you set `signing_key_file`.
 
 ## Choosing a setup
 

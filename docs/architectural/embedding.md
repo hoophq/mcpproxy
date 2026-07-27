@@ -1,8 +1,8 @@
 # Embedding the gateway
 
-`cmd/mcpproxyd` is thin wiring over library packages; a host application
-(e.g. hoop's agent) embeds the same gateway and swaps the seams. Nothing in
-`gateway/` or `checks/` knows about the daemon.
+`cmd/mcpproxyd` is thin wiring over library packages. A host application
+such as hoop's agent embeds the same gateway and swaps the seams. Nothing
+in `gateway/` or `checks/` knows about the daemon.
 
 ## Minimal embedding
 
@@ -22,14 +22,14 @@ gw, err := gateway.New(gateway.Options{
     Held:     heldStore,  // approvals
     Observer: observer,   // telemetry
 })
-// gw.Handler() is an http.Handler serving /mcp — mount it anywhere:
+// gw.Handler() is an http.Handler serving /mcp. Mount it anywhere:
 // a real listener, an in-memory net.Pipe listener, a mux under a path.
 defer gw.Close()          // tears down every session + subprocess
 ```
 
 ## The seams
 
-### `inspect.Hooks` — guardrails, masking, AI analysis
+### `inspect.Hooks`: guardrails, masking, AI analysis
 
 ```go
 hooks := inspect.Hooks{
@@ -47,22 +47,22 @@ hooks := inspect.Hooks{
 }
 ```
 
-Nil hooks cost nothing: `checks.Assemble` omits the guardrails/redact
-stages entirely when the hook is nil. Hosts with a fail-closed requirement
-(guard rules configured but no engine available) must refuse construction
-themselves — the library does not guess policy.
+`checks.Assemble` omits the guardrails and redact stages when the hook is
+nil, so a nil hook costs nothing at runtime. A host with a fail-closed
+requirement (guard rules configured, no engine available) must refuse
+construction itself, because the library does not guess policy.
 
-### `audit.Sink` — the event stream
+### `audit.Sink`: the event stream
 
 ```go
 type Sink interface{ Emit(ctx context.Context, ev audit.Event) }
 ```
 
-Implementations must not block. `audit.MultiSink` fans out; the `wal`
-package is a ready-made per-session JSONL sink. A host bridges this to its
-own session storage to get the tool-call timeline in its UI.
+An implementation must return without blocking. `audit.MultiSink` fans
+out, and the `wal` package gives you a per-session JSONL sink. Bridge this
+to your own session storage to surface the tool-call timeline in your UI.
 
-### `gateway.HeldStore` — approvals
+### `gateway.HeldStore`: approvals
 
 ```go
 type HeldStore interface {
@@ -71,22 +71,22 @@ type HeldStore interface {
 ```
 
 The gateway parks the call and waits on the channel (true=approved).
-`approval.Store` + `approval.NewAPI` is the standalone implementation; a
-host replaces it with its own review workflow (create a review record,
-resolve the channel when a human decides). Pass `Held: nil` and holds
-degrade to deny — fail closed.
+`approval.Store` plus `approval.NewAPI` is the standalone implementation.
+A host replaces it with its own review workflow: create a review record,
+resolve the channel once a human decides. Pass `Held: nil` and holds
+degrade to deny, failing closed.
 
-### `gateway.IdentityResolver` — identity
+### `gateway.IdentityResolver`: identity
 
 ```go
 Resolver: func(r *http.Request) (inspect.Identity, error) { … }
 ```
 
-If the host already authenticated the caller (gateway in front), return
-the known identity and skip `auth/inbound` entirely. Identity lands in
-every audit event, review, and per-user token grant.
+If your host already authenticated the caller, with the gateway sitting
+behind it, return the known identity and skip `auth/inbound`. Identity
+lands in every audit event, review, and per-user token grant.
 
-### `gateway.Observer` — telemetry
+### `gateway.Observer`: telemetry
 
 ```go
 type Observer interface {
@@ -96,19 +96,19 @@ type Observer interface {
 
 `telemetry.New` provides Prometheus + OTLP; any implementation works.
 
-### `outbound.TokenSource` — backend credentials
+### `outbound.TokenSource`: backend credentials
 
-`backend.NewFactory(name, cfg, tokenSource)` — the token source supplies
-the per-request Authorization value. `auth/outbound` ships static,
-passthrough, OAuth (discovery/DCR/PKCE/refresh), RFC 8693 exchange, and
-`authserver.NewUpstreamSwapSource`. A host can inject anything matching
-`func(ctx) (string, error)`.
+`backend.NewFactory(name, cfg, tokenSource)` takes a token source that
+supplies the per-request Authorization value. `auth/outbound` ships
+static, passthrough, OAuth (discovery/DCR/PKCE/refresh), RFC 8693
+exchange, and `authserver.NewUpstreamSwapSource`. A host can inject
+anything matching `func(ctx) (string, error)`.
 
-Context carriers matter when composing: `outbound.WithUser` (per-user
+Context carriers matter when composing. Set `outbound.WithUser` (per-user
 grant keys), `outbound.WithClientToken` (passthrough), and
-`outbound.WithInboundToken` (token exchange subject) must be set on the
-request context before the gateway handles it — do this in the resolver,
-which runs first and may rewrite the request context.
+`outbound.WithInboundToken` (token exchange subject) on the request
+context before the gateway handles it. Do this in the resolver, which
+runs first and may rewrite the request context.
 
 ## Custom checks
 
@@ -121,15 +121,15 @@ type Check interface {
 }
 ```
 
-Append to the `Pipeline` slice (order matters — see
-[inspection-pipeline.md](inspection-pipeline.md)). `optimizer.New` is a
-complete worked example: it mutates `tools/list` results in place and
+Append to the `Pipeline` slice; order matters, so read
+[inspection-pipeline.md](inspection-pipeline.md) first. `optimizer.New`
+works as a complete example: it mutates `tools/list` results in place and
 always allows.
 
 ## Byte-stream hosts
 
-Hosts whose transport hands you raw bytes rather than HTTP requests (hoop's
-agent protocol) bridge with an in-memory listener: feed the byte stream
-into one end of a `net.Pipe`-backed `net.Listener`, run
-`http.Serve(listener, gw.Handler())` on the other. The gateway stays
-transport-agnostic; the bridge owns framing.
+A host whose transport hands you raw bytes rather than HTTP requests
+(hoop's agent protocol) bridges with an in-memory listener: feed the byte
+stream into one end of a `net.Pipe`-backed `net.Listener`, then run
+`http.Serve(listener, gw.Handler())` on the other. The gateway never sees
+the underlying transport, and the bridge owns framing.

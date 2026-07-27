@@ -22,41 +22,42 @@ flowchart LR
 
 One client POST = one JSON-RPC message:
 
-1. **Identity** — the resolver authenticates the request (OIDC, static
+1. **Identity.** The resolver authenticates the request (OIDC, static
    token, GitHub, AWS STS, or the embedded auth server's own JWTs).
    `initialize` creates a session (`Mcp-Session-Id` response header);
    every later message must carry that header.
-2. **Routing resolution** — for `tools/call` under aggregation, the
-   `<backend>_` prefix picks the backend and is stripped, so checks see the
-   real backend + bare tool name.
-3. **C2S pipeline** — the message runs through the check chain. Outcomes:
+2. **Routing resolution.** For `tools/call` under aggregation, the
+   `<backend>_` prefix picks the backend and the router strips it, so
+   checks see the real backend plus the bare tool name.
+3. **C2S pipeline.** The message runs through the check chain. Outcomes:
    forward (possibly mutated), deny (synthesized JSON-RPC error, session
    lives), hold (parked for human approval), or kill (session torn down).
-4. **Round-trip** — the message goes to the backend; the response is
-   correlated by JSON-RPC id.
-5. **S2C pipeline** — the response runs through the chain too (catalog
+4. **Round-trip.** The gateway sends the message to the backend and
+   correlates the response by JSON-RPC id.
+5. **S2C pipeline.** The response runs through the chain too (catalog
    filtering, rug-pull fingerprinting, redaction, truncation) before
    returning to the client.
 6. **Server-initiated traffic** (notifications, `sampling/createMessage`,
    `elicitation/create`) arrives on the backend pump, passes the S2C
-   pipeline (server→LLM requests are denied by default), and is delivered
-   over the session's SSE stream (`GET /mcp`).
+   pipeline, which denies server→LLM requests by default, and reaches the
+   client over the session's SSE stream (`GET /mcp`).
 
 ## Sessions
 
-- A session = one client conversation = one live connection to EVERY
+- A session = one client conversation = one live connection to every
   configured backend. `initialize` fans out to all backends; stdio
-  backends spawn a child per session, killed (whole process group) at
-  session end.
-- Backend lifetime is deliberately decoupled from the HTTP request context
-  (`context.WithoutCancel`): the initialize POST returning must not kill
-  the child that was just spawned.
+  backends spawn a child per session, and the gateway kills the whole
+  process group at session end.
+- The gateway decouples backend lifetime from the HTTP request context
+  (`context.WithoutCancel`), so a returning `initialize` POST does not
+  kill the child it spawned.
 - Sessions end on `DELETE /mcp`, backend death, a kill verdict, or the
   idle reaper (default 30 min).
 
 ## Aggregation
 
-More than one backend turns the gateway into a virtual MCP:
+With more than one backend configured, the gateway presents a single
+virtual MCP server:
 
 - `tools/list` fans out and merges; each tool is prefixed `<backend>_`.
 - `tools/call` routes by prefix; the backend sees its original tool name.
@@ -92,27 +93,28 @@ More than one backend turns the gateway into a virtual MCP:
 
 **Tolerant protocol handling.** The gateway parses only what it inspects;
 unknown fields, methods, and capabilities pass through untouched. MCP
-revisions ship frequently — strict validation would turn every spec bump
+revisions ship often, and strict validation would turn every spec bump
 into an outage.
 
-**Messages, not byte streams.** Inspection happens per JSON-RPC message
-(including per SSE event), never on opaque HTTP bodies. That is what makes
-tool-level policy, catalog rewriting, and structured audit possible.
+**Per-message inspection.** Checks run on each JSON-RPC message, including
+each SSE event, never on opaque HTTP bodies. Tool-level policy, catalog
+rewriting, and structured audit all depend on that granularity.
 
 **Deny ≠ kill.** A blocked tool call answers with a JSON-RPC error the
-model can read and explain; the session survives. Killing is reserved for
-integrity violations (rug pull, poisoned catalog).
+model can read and explain; the session survives. The gateway kills a
+session only on an integrity violation (rug pull, poisoned catalog).
 
-**Catalog filtering over call blocking.** A denied tool is removed from
-`tools/list` before the model sees it — a tool the model cannot see is a
-tool it never attempts. Call-time checks remain as the backstop.
+**Catalog filtering over call blocking.** Policy strips a denied tool from
+`tools/list` before the model sees it, so the model has no name to call.
+Call-time checks remain as the backstop.
 
-**Sessions own subprocesses.** One stdio child per session, process-group
-killed on teardown. No sharing: MCP servers are stateful after
-`initialize`, and isolation makes cleanup trivial.
+**Sessions own subprocesses.** Each session gets one stdio child, and
+teardown kills its process group. Nothing is shared: MCP servers hold
+state after `initialize`, and per-session isolation keeps cleanup to a
+single process-group signal.
 
 **Seams over dependencies.** Guardrails, masking, AI analysis, approvals,
 audit, telemetry, and identity are all interfaces (`inspect.Hooks`,
 `gateway.HeldStore`, `audit.Sink`, …). The daemon wires standalone
-implementations; an embedding host (hoop) swaps in its own without touching
-gateway code.
+implementations; an embedding host such as hoop swaps in its own without
+touching gateway code.

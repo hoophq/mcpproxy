@@ -2,8 +2,8 @@
 
 A security gateway for MCP (Model Context Protocol) servers. It terminates
 streamable-HTTP MCP on the front, inspects every JSON-RPC message in both
-directions, and bridges to one or more backends — local stdio subprocesses or
-remote MCP endpoints.
+directions, and bridges to one or more backends: local stdio subprocesses
+or remote MCP endpoints.
 
 ```
 MCP client ──HTTP──▶ mcpproxyd ──▶ stdio child (npx some-mcp-server)
@@ -14,28 +14,30 @@ MCP client ──HTTP──▶ mcpproxyd ──▶ stdio child (npx some-mcp-ser
 
 ## Why
 
-MCP servers are arbitrary third-party code that your AI agent calls with real
-credentials. mcpproxy puts a control point between them:
+Your agent calls MCP servers with real credentials, and those servers are
+third-party code you did not write. Put mcpproxy on that path and you get:
 
-- **Policy** — allow/deny tools by glob; tools removed from the catalog are
-  invisible to the model, not just blocked.
-- **Approvals** — hold flagged tool calls until a human approves via REST API.
-- **Rug-pull detection** — fingerprint every tool (name, description, input
-  schema); a mid-session change kills the session or raises an alert.
-- **Server-request gating** — `sampling/createMessage` and
-  `elicitation/create` from the server are denied by default.
-- **Budgets** — max calls per session, per-tool rate limits, result-size
+- **Policy:** allow/deny tools by glob. mcpproxy strips denied tools from
+  `tools/list`, so the model never sees them.
+- **Approvals:** hold flagged tool calls until a human approves them over
+  the REST API.
+- **Rug-pull detection:** fingerprint every tool (name, description, input
+  schema). If a fingerprint changes mid-session, mcpproxy kills the session
+  or raises an alert.
+- **Server-request gating:** the gateway denies `sampling/createMessage`
+  and `elicitation/create` from the server by default.
+- **Budgets:** max calls per session, per-tool rate limits, result-size
   truncation.
-- **Audit** — structured events (`mcp.tool_call`, `mcp.tool_denied`,
+- **Audit:** structured events (`mcp.tool_call`, `mcp.tool_denied`,
   `mcp.tools_changed`, …) to logs and per-session JSONL replay files.
-- **Auth, all three planes** — inbound (who may talk to the gateway: OIDC,
+- **Auth, all three planes:** inbound (who may talk to the gateway: OIDC,
   GitHub, AWS STS, static token), outbound (how the gateway auths to MCP
   servers: static headers, passthrough, full OAuth with discovery + DCR +
   PKCE + refresh, RFC 8693 token exchange), and an embedded OAuth
   authorization server so MCP clients can OAuth against the gateway itself.
-- **Aggregation** — several backends behind one endpoint; tools are prefixed
-  `<backend>_<tool>` and routed automatically.
-- **Telemetry** — Prometheus metrics and OTLP traces per message.
+- **Aggregation:** several backends behind one endpoint. mcpproxy prefixes
+  tools `<backend>_<tool>` and routes each call to its backend.
+- **Telemetry:** Prometheus metrics and OTLP traces per message.
 
 ## Quick start
 
@@ -55,9 +57,9 @@ Point any MCP client (Claude Code, Cursor, MCP Inspector) at
 
 ## Configuration
 
-One YAML file. `${ENV_VAR}` references are expanded. Full schema in
-[`config/config.go`](config/config.go); every option is demonstrated in
-[`examples/`](examples/):
+One YAML file. mcpproxy expands `${ENV_VAR}` references at load. Full
+schema in [`config/config.go`](config/config.go); [`examples/`](examples/)
+covers every option:
 
 | Example | Shows |
 |---|---|
@@ -85,7 +87,7 @@ guide: [`docs/architectural/`](docs/architectural/).
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /mcp` | one JSON-RPC message (initialize starts a session; `Mcp-Session-Id` header carries it on) |
+| `POST /mcp` | one JSON-RPC message (initialize starts a session; later messages carry the `Mcp-Session-Id` header) |
 | `GET /mcp` | SSE stream of server-initiated messages for the session |
 | `DELETE /mcp` | end the session |
 | `GET /approvals/` | pending held tool calls (bearer: `approvals.api_token`) |
@@ -96,8 +98,8 @@ guide: [`docs/architectural/`](docs/architectural/).
 
 ## Session recording
 
-With `wal_dir` set, every session writes an append-only JSONL file of audit
-events — one line per protocol event, replayable for review:
+With `wal_dir` set, mcpproxy writes one append-only JSONL file per session,
+one line per audit event, replayable for review:
 
 ```sh
 cat sessions/<sid>.jsonl | jq -r '[.time,.event,.tool // "",.reason // ""] | @tsv'
@@ -105,18 +107,19 @@ cat sessions/<sid>.jsonl | jq -r '[.time,.event,.tool // "",.reason // ""] | @ts
 
 ## State
 
-OAuth tokens and DCR client registrations persist under
-`$MCPPROXY_STATE_DIR` (default `~/.mcpproxy`), AES-256-GCM encrypted with a
-generated keyfile. The embedded auth server's sessions are memory-only.
+mcpproxy stores OAuth tokens and DCR client registrations under
+`$MCPPROXY_STATE_DIR` (default `~/.mcpproxy`), encrypted with AES-256-GCM
+under a generated keyfile. The embedded auth server keeps its sessions in
+memory.
 
 ## Embedding
 
-The daemon is thin wiring over library packages; hosts (e.g. hoop) embed the
-gateway and supply their own seams:
+The daemon is thin wiring over the library packages. Hosts such as hoop
+embed the gateway and supply their own implementations of:
 
-- `inspect.Hooks` — guardrails, data masking, AI analysis callbacks
-- `audit.Sink` — event stream consumer
-- `gateway.HeldStore` — approval workflow backend
-- `gateway.IdentityResolver` — inbound identity (skip `auth/inbound` if the
-  host already authenticated the caller)
-- `gateway.Observer` — telemetry
+- `inspect.Hooks`: guardrails, data masking, AI analysis callbacks
+- `audit.Sink`: event stream consumer
+- `gateway.HeldStore`: approval workflow backend
+- `gateway.IdentityResolver`: inbound identity (skip `auth/inbound` when
+  the host already authenticated the caller)
+- `gateway.Observer`: telemetry

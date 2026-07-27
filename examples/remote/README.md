@@ -1,14 +1,14 @@
 # Remote MCP servers
 
 Known publicly hosted MCP endpoints and how to configure them as mcpproxy
-backends. Grouped by outbound auth mode; ready-to-run configs sit next to
+backends, grouped by outbound auth mode. Ready-to-run configs sit next to
 this file.
 
-Notes before you pick one:
+Before you pick one:
 
-- Both remote transports are supported: **streamable-HTTP**
+- Both remote transports work: **streamable-HTTP**
   (`transport: streamable-http`) and the legacy **HTTP+SSE** protocol
-  (`transport: sse`, marked ⚠ below — set the transport accordingly).
+  (`transport: sse`). Entries marked ⚠ below need `transport: sse`.
 - All of these ship in the built-in catalog ([`catalog/catalog.yaml`](../../catalog/catalog.yaml)):
   `import-catalog -list` shows them, `import-catalog linear stripe …`
   emits ready-made backend stanzas. `-catalog <file>` loads a custom YAML
@@ -17,7 +17,7 @@ Notes before you pick one:
 - `auth: oauth` endpoints run discovery + dynamic client registration +
   PKCE; the daemon prints the authorize URL on first use. Many of these
   providers also issue static tokens (PATs) usable with `auth: static`.
-- URLs change; verify against the provider's docs if a probe returns 404.
+- URLs change. Check the provider's docs if a probe returns 404.
 
 ## No auth required
 
@@ -41,7 +41,7 @@ Config: [`no-auth.yaml`](no-auth.yaml)
 
 Config: [`static-token.yaml`](static-token.yaml)
 
-## OAuth (`auth: oauth` — discovery + DCR + PKCE)
+## OAuth (`auth: oauth`, discovery + DCR + PKCE)
 
 | Provider | URL | Notes |
 |---|---|---|
@@ -63,12 +63,12 @@ Config: [`oauth.yaml`](oauth.yaml)
 ## Everything at once
 
 [`aggregated.yaml`](aggregated.yaml) fronts several remotes behind one
-endpoint with per-backend policy — the "one URL for the whole team" setup.
+endpoint with per-backend policy, giving your team one URL for everything.
 
 ## Local-only impostors
 
-Some well-known "MCP servers" are NOT remote endpoints despite marketing:
-Figma's Dev Mode MCP runs locally inside the desktop app
-(`http://127.0.0.1:3845/mcp` — configure it as a `streamable-http` backend
-with that URL), and most community servers (filesystem, git, fetch…) are
-stdio packages — see the top-level examples for those.
+Marketing calls some well-known projects "MCP servers" when they expose no
+remote endpoint. Figma's Dev Mode MCP runs locally inside the desktop app,
+so configure `http://127.0.0.1:3845/mcp` as a `streamable-http` backend.
+Most community servers (filesystem, git, fetch…) ship as stdio packages;
+see the top-level examples for those.
