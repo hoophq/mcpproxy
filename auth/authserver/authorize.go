@@ -11,11 +11,11 @@ import (
 
 // handleAuthorize implements GET /authorize.
 //
-// Errors split two ways, as RFC 6749 §4.1.2.1 requires. If we cannot trust the
-// client_id/redirect_uri pair we render the error directly, because redirecting
-// to an unvalidated URI is how authorization codes get stolen. Once the pair
-// checks out, every later failure goes back to the client as a redirect with
-// error parameters.
+// Errors split two ways, as RFC 6749 §4.1.2.1 requires. While the
+// client_id/redirect_uri pair is still untrusted, the server renders the
+// error itself, because redirecting to an unvalidated URI is how
+// authorization codes get stolen. Once the pair checks out, every later
+// failure goes back to the client as a redirect with error parameters.
 func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	clientID := q.Get("client_id")
@@ -56,8 +56,8 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if m := q.Get("code_challenge_method"); m != "S256" {
-		// OAuth 2.1 removed "plain"; an absent method defaults to it, so an
-		// absent method is also rejected rather than silently downgraded.
+		// OAuth 2.1 removed "plain", and an absent method defaults to it, so
+		// an absent method is rejected rather than downgraded in silence.
 		redirectErr("invalid_request", "code_challenge_method must be S256")
 		return
 	}
@@ -79,8 +79,8 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.upstream == nil {
-		// No IdP: everyone is the same user. Useful for local development and
-		// dangerous anywhere else, hence the warning on every authorization.
+		// No IdP: every caller is the same user. That suits local development
+		// and is dangerous anywhere else, hence a warning per authorization.
 		s.log.Warn("auth server has no upstream IdP; auto-approving as dev identity",
 			"subject", devSubject, "client_id", clientID)
 		g.Subject = devSubject
@@ -90,9 +90,9 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Federated: park the grant and bounce the user to the IdP. Our grant id
-	// travels as the upstream `state` so /callback can find it again — it is
-	// unguessable random, which is exactly what state needs to be.
+	// Federated: park the grant and bounce the user to the IdP. The grant id
+	// travels as the upstream `state` so /callback can find it again, and it
+	// is unguessable random, which is what state needs to be.
 	s.store.putGrant(g)
 	upstreamURL, err := s.upstream.AuthorizeURL(id)
 	if err != nil {
@@ -103,9 +103,9 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, upstreamURL, http.StatusFound)
 }
 
-// handleCallback implements GET /callback: the upstream IdP returning the user
-// to us. It completes the parked grant and then redirects onward to the MCP
-// client with our own authorization code.
+// handleCallback implements GET /callback, where the upstream IdP returns the
+// user. It completes the parked grant, then redirects onward to the MCP
+// client with an authorization code this server minted.
 func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	if s.upstream == nil {
 		writeOAuthError(w, http.StatusNotFound, "invalid_request", "no upstream identity provider is configured")
@@ -116,7 +116,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	g, ok := s.store.takeGrant(q.Get("state"))
 	if !ok {
 		// Unknown, replayed or expired state. Nothing to redirect to, since
-		// the grant carried the only redirect URI we had validated.
+		// the grant carried the one redirect URI this server had validated.
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "unknown or expired authorization state")
 		return
 	}
@@ -158,8 +158,8 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	g.Email = email
 	g.Claims = claims
 	if tokens != nil {
-		// Keyed by our subject so the token-swap source can find it later
-		// from nothing but the authenticated caller. See swap.go.
+		// Keyed by this server's subject so the token-swap source can find it
+		// later from the authenticated caller alone. See swap.go.
 		s.store.putUpstream(subject, tokens)
 	}
 	s.log.Debug("federated login complete", "subject", subject, "client_id", g.ClientID)
@@ -180,8 +180,8 @@ func (s *Server) issueCode(w http.ResponseWriter, r *http.Request, g *grant) {
 
 	target, err := appendQuery(g.RedirectURI, map[string]string{"code": code, "state": g.State})
 	if err != nil {
-		// The URI was validated at registration, so this is not reachable
-		// through client input; fail closed rather than redirect somewhere odd.
+		// Registration validated the URI, so client input cannot reach this
+		// branch; fail closed rather than redirect somewhere odd.
 		s.log.Error("build client redirect", "error", err)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not build the redirect")
 		return
@@ -220,10 +220,10 @@ func appendQuery(raw string, params map[string]string) (string, error) {
 	return u.String(), nil
 }
 
-// validateRedirectURI enforces what we are willing to redirect a browser to
-// after authentication. Absolute URI, no fragment (RFC 6749 §3.1.2), and
-// either a private-use scheme (native apps: "com.example.app:/callback") or
-// an http/https URL.
+// validateRedirectURI states where this server will redirect a browser after
+// authentication: an absolute URI with no fragment (RFC 6749 §3.1.2), under
+// either a private-use scheme for native apps ("com.example.app:/callback")
+// or http/https.
 func validateRedirectURI(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -241,8 +241,8 @@ func validateRedirectURI(raw string) error {
 			return fmt.Errorf("redirect_uri %q has no host", raw)
 		}
 	default:
-		// Private-use scheme. Requiring a dot mirrors RFC 8252 §7.1's
-		// recommendation that native clients use a reverse-DNS scheme.
+		// Private-use scheme. Requiring a dot follows RFC 8252 §7.1, which
+		// recommends a reverse-DNS scheme for native clients.
 		if !strings.Contains(u.Scheme, ".") {
 			return fmt.Errorf("redirect_uri %q uses unsupported scheme %q", raw, u.Scheme)
 		}
@@ -256,8 +256,8 @@ func verifyPKCE(verifier, challenge string) bool {
 		return false
 	}
 	// RFC 7636 §4.1: 43..128 characters from the unreserved set. The length
-	// floor is the security property — it is what gives the verifier enough
-	// entropy to be unguessable.
+	// floor carries the security property, giving the verifier enough entropy
+	// to resist guessing.
 	if len(verifier) < 43 || len(verifier) > 128 {
 		return false
 	}

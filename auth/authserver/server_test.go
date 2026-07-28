@@ -27,7 +27,7 @@ type testHarness struct {
 	t    *testing.T
 	srv  *Server
 	http *httptest.Server
-	// client follows no redirects: the tests assert on the 302s themselves.
+	// client follows no redirects; the tests assert on the 302s themselves.
 	client *http.Client
 }
 
@@ -41,7 +41,7 @@ func TestMain(m *testing.M) {
 func newHarness(t *testing.T, upstream UpstreamFederator) *testHarness {
 	t.Helper()
 
-	// The issuer must equal the listener URL, but New needs the issuer before
+	// The issuer must equal the listener URL, and New needs the issuer before
 	// the listener exists. Start the listener first, then build the server
 	// around its URL and install the handler.
 	ts := httptest.NewUnstartedServer(nil)
@@ -179,9 +179,8 @@ func TestJWKSPublishesTheES256VerificationKey(t *testing.T) {
 	if k.Kid == "" {
 		t.Error("jwk has no kid; clients cannot select the key")
 	}
-	// RFC 7518 §6.2.1.2: coordinates are fixed-width for the curve, so the
-	// decoded length must be exactly 32 bytes even when the value has leading
-	// zero bytes.
+	// RFC 7518 §6.2.1.2: coordinates are fixed-width for the curve, so each
+	// decodes to 32 bytes even when the value carries leading zero bytes.
 	for name, coord := range map[string]string{"x": k.X, "y": k.Y} {
 		raw, err := base64.RawURLEncoding.DecodeString(coord)
 		if err != nil {
@@ -193,8 +192,8 @@ func TestJWKSPublishesTheES256VerificationKey(t *testing.T) {
 		}
 	}
 
-	// The kid in the JWKS must match the one tokens carry, or verification
-	// by key lookup breaks.
+	// The kid in the JWKS must match the one tokens carry, or verification by
+	// key lookup breaks.
 	if set.Keys[0].Kid != h.srv.kid {
 		t.Errorf("JWKS kid %q != signing kid %q", set.Keys[0].Kid, h.srv.kid)
 	}
@@ -344,7 +343,7 @@ func TestFullCodeFlowWithAutoApproval(t *testing.T) {
 		t.Errorf("iss = %v, want %q", id.Claims["iss"], h.http.URL)
 	}
 
-	// A "Bearer " prefix is tolerated so callers can pass the raw header.
+	// The server tolerates a "Bearer " prefix so callers can pass the raw header.
 	if _, err := h.srv.ValidateToken(context.Background(), "Bearer "+tok.AccessToken); err != nil {
 		t.Errorf("ValidateToken with Bearer prefix: %v", err)
 	}
@@ -481,8 +480,8 @@ func TestAuthorizeRejectsBadRequests(t *testing.T) {
 		}
 	}
 
-	// Unvalidated client/redirect: the error must be rendered, never
-	// redirected, or we become an open redirector.
+	// Unvalidated client/redirect: render the error, never redirect it, or
+	// this endpoint becomes an open redirector.
 	t.Run("unknown client renders the error", func(t *testing.T) {
 		v := base()
 		v.Set("client_id", "nope")
@@ -753,8 +752,8 @@ func TestSigningKeyIsPersistedAndReused(t *testing.T) {
 		t.Errorf("kid changed across restart: %q -> %q; tokens would stop verifying", first.kid, second.kid)
 	}
 
-	// A token from the first instance must verify on the second — that is the
-	// observable reason to persist the key at all.
+	// A token from the first instance must verify on the second, the
+	// observable reason to persist the key.
 	tokenStr, err := first.signAccessToken("client", "alice", "alice@example.com", "", time.Now())
 	if err != nil {
 		t.Fatalf("sign: %v", err)

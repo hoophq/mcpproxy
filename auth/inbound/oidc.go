@@ -18,8 +18,8 @@ type OIDCOptions struct {
 	// <Issuer>/.well-known/openid-configuration.
 	Issuer string
 	// Audience, when set, must appear in the token's aud claim. Empty skips
-	// the check — appropriate only when the issuer is dedicated to this
-	// gateway, since otherwise any token it mints is accepted here.
+	// the check, which fits an issuer dedicated to this gateway; against a
+	// shared issuer it accepts any token that issuer mints.
 	Audience string
 	// Scopes, when set, must all be present in the token's space-delimited
 	// scope claim (falling back to the "scp" array some issuers emit).
@@ -31,10 +31,11 @@ type OIDCOptions struct {
 
 // oidcVerifier lazily builds and caches an *oidc.IDTokenVerifier.
 //
-// Discovery is deferred to the first request on purpose: an IdP that is slow or
-// down at daemon startup must not prevent the gateway from booting and serving
-// its health endpoint. Once discovery succeeds the verifier is cached forever;
-// the underlying oidc.RemoteKeySet handles JWKS refresh and key rotation.
+// Discovery waits for the first request by design: an IdP that is slow or
+// down at daemon startup must not stop the gateway from booting and serving
+// its health endpoint. Once discovery succeeds the verifier stays cached for
+// the process lifetime; oidc.RemoteKeySet handles JWKS refresh and key
+// rotation.
 type oidcVerifier struct {
 	opts OIDCOptions
 
@@ -45,9 +46,9 @@ type oidcVerifier struct {
 
 // get returns the cached verifier, running discovery once if needed.
 //
-// A failed discovery is not cached: the IdP may simply have been restarting,
-// and retrying on the next request is what lets the gateway self-heal without
-// an operator bouncing it.
+// A failed discovery stays out of the cache: the IdP may have been
+// restarting, and a retry on the next request lets the gateway recover
+// without an operator bouncing it.
 func (o *oidcVerifier) get(ctx context.Context) (*oidc.IDTokenVerifier, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -56,8 +57,8 @@ func (o *oidcVerifier) get(ctx context.Context) (*oidc.IDTokenVerifier, error) {
 	}
 
 	// The key set outlives this request, so it must not hold the request's
-	// context: cancelling one request would otherwise poison JWKS refreshes
-	// for every later request. o.ctx carries only the HTTP client override.
+	// context: cancelling one request would poison JWKS refreshes for every
+	// later request. o.ctx carries the HTTP client override and nothing else.
 	discoverCtx := o.ctx
 	if deadline, ok := ctx.Deadline(); ok {
 		var cancel context.CancelFunc
@@ -89,7 +90,7 @@ func OIDC(opts OIDCOptions) (Resolver, error) {
 	ov := &oidcVerifier{opts: opts, ctx: base}
 
 	// Copy the required scopes so a caller mutating the config slice after
-	// construction cannot silently change the policy this resolver enforces.
+	// construction cannot change the policy this resolver enforces.
 	required := append([]string(nil), opts.Scopes...)
 
 	return func(r *http.Request) (inspect.Identity, error) {
@@ -123,7 +124,7 @@ func OIDC(opts OIDCOptions) (Resolver, error) {
 	}, nil
 }
 
-// requireScopes checks that every scope in want is granted by the token.
+// requireScopes checks that the token grants every scope in want.
 func requireScopes(claims map[string]any, want []string) error {
 	if len(want) == 0 {
 		return nil
@@ -137,9 +138,9 @@ func requireScopes(claims map[string]any, want []string) error {
 	return nil
 }
 
-// tokenScopes reads the granted scopes from the two shapes issuers actually
-// emit: RFC 8693's space-delimited "scope" string, and Azure AD's "scp", which
-// is sometimes a string and sometimes an array.
+// tokenScopes reads the granted scopes from the two shapes issuers emit: RFC
+// 8693's space-delimited "scope" string, and Azure AD's "scp", which arrives
+// as either a string or an array.
 func tokenScopes(claims map[string]any) map[string]struct{} {
 	out := make(map[string]struct{})
 	add := func(v any) {

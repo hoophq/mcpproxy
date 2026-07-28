@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 )
 
-// jwk is the subset of RFC 7517 we emit: a P-256 signing key.
+// jwk is the subset of RFC 7517 this server emits: a P-256 signing key.
 type jwk struct {
 	Kty string `json:"kty"`
 	Crv string `json:"crv"`
@@ -31,10 +31,10 @@ type jwkSet struct {
 }
 
 // loadOrCreateKey returns the ES256 signing key. An empty path yields an
-// ephemeral in-memory key: fine for tests and single-process dev, fatal for a
-// restartable deployment because every restart invalidates outstanding tokens.
-// A non-empty path is read if it exists and otherwise generated and persisted
-// with 0600 so a restart keeps signing with the same key.
+// ephemeral in-memory key, which suits tests and single-process dev and ruins
+// a restartable deployment, where each restart invalidates outstanding
+// tokens. A non-empty path is read when it exists, otherwise generated and
+// persisted with 0600 so a restart keeps signing with the same key.
 func loadOrCreateKey(path string) (*ecdsa.PrivateKey, error) {
 	if path == "" {
 		return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -66,7 +66,7 @@ func loadOrCreateKey(path string) (*ecdsa.PrivateKey, error) {
 		}
 	}
 	block := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
-	// 0600: the private key is the root of trust for every token we mint.
+	// 0600: this private key is the root of trust for every token minted here.
 	if err := os.WriteFile(path, block, 0o600); err != nil {
 		return nil, fmt.Errorf("write signing key %s: %w", path, err)
 	}
@@ -100,9 +100,9 @@ func parseECKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 
 // keyID derives a stable kid from the public key: the first 16 characters of
 // the RFC 7638 JWK thumbprint (base64url of SHA-256 over the canonical JWK).
-// Truncation keeps JWT headers small; 96 bits of a hash is far beyond what a
-// single-key server needs to disambiguate, and kid is a lookup hint, not a
-// security boundary.
+// Truncation keeps JWT headers small. 96 bits of a hash overshoots what a
+// single-key server needs to disambiguate, and kid serves as a lookup hint
+// rather than a security boundary.
 func keyID(pub *ecdsa.PublicKey) (string, error) {
 	x, y, err := coords(pub)
 	if err != nil {
@@ -132,10 +132,9 @@ func publicJWKS(pub *ecdsa.PublicKey, kid string) (jwkSet, error) {
 	}}}, nil
 }
 
-// coords encodes the affine coordinates as fixed-width base64url, which RFC
-// 7518 §6.2.1.2 requires: left-padding to the curve's 32-byte field size is
-// what makes two encodings of the same key byte-identical (and thumbprints
-// stable).
+// coords encodes the affine coordinates as fixed-width base64url, as RFC 7518
+// §6.2.1.2 requires. Left-padding to the curve's 32-byte field size makes two
+// encodings of the same key byte-identical, which keeps thumbprints stable.
 func coords(pub *ecdsa.PublicKey) (string, string, error) {
 	if pub == nil || pub.Curve != elliptic.P256() {
 		return "", "", fmt.Errorf("signing key must be EC P-256")

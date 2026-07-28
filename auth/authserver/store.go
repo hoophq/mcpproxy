@@ -14,14 +14,14 @@ import (
 // §4.1.2 recommends a maximum of 10 minutes.
 const codeTTL = 10 * time.Minute
 
-// grantTTL bounds a pending authorization (the window between /authorize and
-// the upstream IdP returning to /callback). Generous, because it contains a
-// human typing a password.
+// grantTTL bounds a pending authorization, the window between /authorize and
+// the upstream IdP returning to /callback. It runs long because a human is
+// typing a password inside it.
 const grantTTL = 15 * time.Minute
 
-// client is a registered OAuth client. Every client is public (no secret):
-// MCP clients are native/CLI apps that cannot keep one, which is why PKCE is
-// mandatory rather than optional here.
+// client is a registered OAuth client. Every client is public and holds no
+// secret: MCP clients are native and CLI apps that cannot keep one, so PKCE
+// is mandatory here.
 type client struct {
 	ID           string
 	RedirectURIs []string
@@ -29,8 +29,8 @@ type client struct {
 	IssuedAt     time.Time
 }
 
-// allowsRedirect reports whether uri was registered. Exact string match is
-// deliberate — prefix or wildcard matching on redirect URIs is the classic
+// allowsRedirect reports whether uri was registered. The exact string match
+// is the point: prefix or wildcard matching on redirect URIs is the classic
 // open-redirect hole in OAuth deployments.
 func (c *client) allowsRedirect(uri string) bool {
 	for _, u := range c.RedirectURIs {
@@ -41,9 +41,9 @@ func (c *client) allowsRedirect(uri string) bool {
 	return false
 }
 
-// grant is one in-flight authorization request. It is created at /authorize,
-// completed either immediately (no upstream) or at /callback (federated), and
-// consumed once at /token.
+// grant is one in-flight authorization request. /authorize creates it,
+// /authorize itself completes it when no upstream is configured or /callback
+// does when federated, and /token consumes it once.
 type grant struct {
 	ID          string
 	ClientID    string
@@ -63,7 +63,7 @@ type grant struct {
 }
 
 // refreshGrant is what a refresh token stands for. Refresh tokens are opaque
-// random strings, not JWTs, so revoking one means deleting a map entry.
+// random strings rather than JWTs, so revoking one deletes a map entry.
 type refreshGrant struct {
 	ClientID string
 	Subject  string
@@ -73,20 +73,20 @@ type refreshGrant struct {
 	Expires  time.Time
 }
 
-// store holds every mutable piece of authorization state in memory. That is a
-// deliberate limit: restarting the gateway logs everyone out. Persisting it
-// would mean choosing a database, and this gateway is meant to run as a
-// single sidecar process next to its MCP backends.
+// store holds every mutable piece of authorization state in memory. That
+// bound is a choice: restarting the gateway logs everyone out. Persisting it
+// would mean picking a database, and this gateway runs as a single sidecar
+// process next to its MCP backends.
 type store struct {
 	mu      sync.Mutex
 	clients map[string]*client
 	// pending holds authorizations awaiting approval, keyed by grant id.
-	// A grant leaves this map the moment it is approved or abandoned, which
-	// is what makes a replayed upstream callback find nothing.
+	// A grant leaves this map as soon as it is approved or abandoned, so a
+	// replayed upstream callback finds nothing.
 	pending map[string]*grant
-	// codes holds approved authorizations, keyed by the code we handed the
-	// client. Disjoint from pending by construction: a grant lives in exactly
-	// one of the two, never both.
+	// codes holds approved authorizations, keyed by the code the server
+	// handed the client. Disjoint from pending by construction: a grant sits
+	// in one of the two maps, never both.
 	codes    map[string]*grant
 	refresh  map[string]*refreshGrant
 	upstream map[string]*outbound.Token // subject -> upstream tokens
@@ -145,8 +145,8 @@ func (s *store) putCode(g *grant) {
 	s.codes[g.Code] = g
 }
 
-// takeCode redeems an authorization code exactly once. A second call for the
-// same code fails, which is what makes code replay detectable at /token.
+// takeCode redeems an authorization code once. A second call for the same
+// code fails, which makes code replay visible at /token.
 func (s *store) takeCode(code string, now time.Time) (*grant, bool) {
 	if code == "" {
 		return nil, false
@@ -199,9 +199,10 @@ func (s *store) getUpstream(subject string) (*outbound.Token, bool) {
 	return t, ok
 }
 
-// sweep drops expired grants, codes and refresh tokens. Called opportunistically
-// from the token endpoint so a long-running gateway does not accumulate the
-// debris of abandoned logins; there is no background goroutine to leak.
+// sweep drops expired grants, codes and refresh tokens. The token endpoint
+// calls it when it happens to run, so a long-running gateway does not
+// accumulate the debris of abandoned logins and no background goroutine can
+// leak.
 func (s *store) sweep(now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -222,9 +223,9 @@ func (s *store) sweep(now time.Time) {
 	}
 }
 
-// randomToken returns n bytes of cryptographic randomness as base64url, the
-// source of every opaque identifier this package hands out (client ids, grant
-// ids, authorization codes, refresh tokens).
+// randomToken returns n bytes of cryptographic randomness as base64url. It is
+// the source of every opaque identifier this package hands out: client ids,
+// grant ids, authorization codes, refresh tokens.
 func randomToken(n int) (string, error) {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {

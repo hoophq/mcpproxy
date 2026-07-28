@@ -35,7 +35,7 @@ func TestWellKnownHandlerServesRFC9728Metadata(t *testing.T) {
 		t.Errorf("resource = %q, want %q", got.Resource, resource)
 	}
 	// A client that cannot find the authorization server here has no way to
-	// start the OAuth flow, which is the entire point of the endpoint.
+	// start the OAuth flow, which is what the endpoint exists for.
 	if len(got.AuthorizationServers) != 1 || got.AuthorizationServers[0] != as {
 		t.Errorf("authorization_servers = %v, want [%q]", got.AuthorizationServers, as)
 	}
@@ -43,8 +43,8 @@ func TestWellKnownHandlerServesRFC9728Metadata(t *testing.T) {
 
 func TestWellKnownHandlerAcceptsResourceSuffixedPaths(t *testing.T) {
 	// RFC 9728 §3.1 lets a client append the resource path, so a gateway
-	// serving /mcp will be asked for .../oauth-protected-resource/mcp. All of
-	// them describe the same resource.
+	// serving /mcp gets asked for .../oauth-protected-resource/mcp. Every
+	// such path describes the same resource.
 	h := WellKnownHandler("https://gateway.example/mcp", "https://gateway.example/oauth")
 	for _, path := range []string{
 		WellKnownPath,
@@ -114,7 +114,7 @@ func TestWellKnownHandlerNeedsNoCredential(t *testing.T) {
 	h := WellKnownHandler("https://gateway.example/mcp", "https://gateway.example/oauth")
 	rr := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, WellKnownPath, nil)
-	// No Authorization header at all.
+	// No Authorization header.
 	h.ServeHTTP(rr, r)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
@@ -122,8 +122,8 @@ func TestWellKnownHandlerNeedsNoCredential(t *testing.T) {
 }
 
 func TestWellKnownHandlerMountsUnderServeMux(t *testing.T) {
-	// The handler is meant to be registered as a prefix route; this proves the
-	// intended wiring works end to end rather than only under direct calls.
+	// The daemon registers this handler as a prefix route, so exercise that
+	// wiring end to end instead of calling the handler directly.
 	mux := http.NewServeMux()
 	mux.Handle(WellKnownPath, WellKnownHandler("https://gw/mcp", "https://gw/oauth"))
 	mux.Handle(WellKnownPath+"/", WellKnownHandler("https://gw/mcp", "https://gw/oauth"))

@@ -22,7 +22,7 @@ func req(token string) *http.Request {
 
 func TestNewDispatchesOnMode(t *testing.T) {
 	// Each mode must produce a resolver whose behaviour identifies it, so a
-	// mis-wired switch cannot pass by returning "some resolver".
+	// mis-wired switch cannot pass by returning any old resolver.
 	cases := []struct {
 		name    string
 		cfg     config.Inbound
@@ -72,8 +72,8 @@ func TestNewLocalUsesOSUser(t *testing.T) {
 }
 
 func TestNewGitHubModeCallsAPI(t *testing.T) {
-	// Dispatch for github/awssts is proven by the resolver reaching out to the
-	// right protocol surface, since neither mode can succeed offline.
+	// Neither github nor awssts can succeed offline, so the resolver reaching
+	// the right protocol surface is what pins down dispatch.
 	var hit string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hit = r.URL.Path
@@ -115,8 +115,8 @@ func TestNewRejectsUnknownAndInvalidModes(t *testing.T) {
 }
 
 func TestNewCoversEveryValidatedMode(t *testing.T) {
-	// config.Validate accepts this set; New must not reject any of them when
-	// their required fields are present, or a valid config would fail at boot.
+	// config.Validate accepts this set. New must take each one whose required
+	// fields are present, or a valid config would fail at boot.
 	cfgs := []config.Inbound{
 		{Mode: ""},
 		{Mode: "anonymous"},
@@ -134,8 +134,8 @@ func TestNewCoversEveryValidatedMode(t *testing.T) {
 }
 
 func TestOIDCConstructionDoesNotDialIssuer(t *testing.T) {
-	// Discovery must be lazy: an IdP that is down at startup cannot be allowed
-	// to prevent the daemon from booting.
+	// Discovery must stay lazy: an IdP that is down at startup must not stop
+	// the daemon from booting.
 	var calls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
@@ -198,8 +198,8 @@ func TestBearerToken(t *testing.T) {
 }
 
 func TestGlobMatch(t *testing.T) {
-	// ':' and '/' must be ordinary characters: ARNs use both, and path.Match
-	// semantics would break every realistic mapping pattern.
+	// ':' and '/' must behave as ordinary characters: ARNs use both, and
+	// path.Match semantics would break every realistic mapping pattern.
 	cases := []struct {
 		pattern, s string
 		want       bool
@@ -230,7 +230,7 @@ func TestGlobMatch(t *testing.T) {
 
 func TestGlobMatchDoesNotBlowUpOnPathologicalInput(t *testing.T) {
 	// A naive recursive matcher goes exponential here; the iterative one must
-	// return promptly. If this hangs, the resolver is a DoS vector.
+	// return fast. A hang means the resolver is a DoS vector.
 	pattern := strings.Repeat("a*", 20) + "b"
 	s := strings.Repeat("a", 200)
 	if globMatch(pattern, s) {

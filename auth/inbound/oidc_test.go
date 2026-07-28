@@ -18,17 +18,17 @@ import (
 )
 
 // fakeIssuer is a minimal OIDC provider: discovery document, JWKS, and a
-// token minter signing with its own RSA key. It exists so the OIDC resolver is
-// exercised through real signature verification rather than a stubbed verifier.
+// token minter signing with its own RSA key. It puts the OIDC resolver
+// through real signature verification rather than a stubbed verifier.
 type fakeIssuer struct {
 	srv      *httptest.Server
 	key      *rsa.PrivateKey
 	kid      string
 	jwksHits atomic.Int64
 	discHits atomic.Int64
-	// discDown makes the discovery endpoint fail, simulating an IdP outage.
+	// discDown makes the discovery endpoint fail, standing in for an IdP outage.
 	discDown atomic.Bool
-	// jwksDown makes the JWKS endpoint fail after discovery has succeeded.
+	// jwksDown makes the JWKS endpoint fail once discovery has succeeded.
 	jwksDown atomic.Bool
 }
 
@@ -134,8 +134,8 @@ func TestOIDCValidToken(t *testing.T) {
 	if id.Email != "alice@example.com" {
 		t.Errorf("email = %q, want alice@example.com", id.Email)
 	}
-	// Claims must carry the whole token, not just the fields the resolver
-	// itself reads: downstream policy checks match on arbitrary claims.
+	// Claims must carry the whole token, beyond the fields the resolver
+	// reads: downstream policy checks match on arbitrary claims.
 	groups, ok := id.Claims["groups"].([]any)
 	if !ok || len(groups) != 2 {
 		t.Errorf("groups claim = %#v, want a 2-element list", id.Claims["groups"])
@@ -195,8 +195,8 @@ func TestOIDCRejections(t *testing.T) {
 		})
 	}
 
-	// The valid control must pass, proving the rejections above are caused by
-	// the property under test and not by a broken fixture.
+	// The valid control must pass, showing the property under test drives
+	// the rejections above rather than a broken fixture.
 	t.Run("control token is accepted", func(t *testing.T) {
 		if _, err := res(req(fi.mint(t, valid))); err != nil {
 			t.Fatalf("control token rejected: %v", err)
@@ -204,8 +204,8 @@ func TestOIDCRejections(t *testing.T) {
 	})
 }
 
-// tamper flips a character in the JWT payload, invalidating the signature while
-// keeping the token structurally parseable.
+// tamper flips a character in the JWT payload, invalidating the signature
+// while keeping the token structurally parseable.
 func tamper(tok string) string {
 	parts := strings.Split(tok, ".")
 	b := []byte(parts[1])
@@ -219,8 +219,8 @@ func tamper(tok string) string {
 }
 
 func TestOIDCEmptyAudienceSkipsCheck(t *testing.T) {
-	// With no configured audience, any aud must pass — otherwise issuers that
-	// omit aud entirely could never be used.
+	// With no configured audience, any aud must pass, so an issuer that omits
+	// aud stays usable.
 	fi := newFakeIssuer(t)
 	res, err := OIDC(OIDCOptions{Issuer: fi.srv.URL, HTTPClient: fi.srv.Client()})
 	if err != nil {
@@ -237,8 +237,8 @@ func TestOIDCEmptyAudienceSkipsCheck(t *testing.T) {
 }
 
 func TestOIDCScopeClaimShapes(t *testing.T) {
-	// Issuers disagree on how scopes are encoded; all three real shapes must
-	// satisfy the same requirement.
+	// Issuers disagree on how they encode scopes; every shape seen in the
+	// wild must satisfy the same requirement.
 	fi := newFakeIssuer(t)
 	res, err := OIDC(OIDCOptions{
 		Issuer:     fi.srv.URL,
@@ -288,19 +288,19 @@ func TestOIDCDiscoveryHappensOnceAndRetriesAfterFailure(t *testing.T) {
 			t.Fatalf("resolve: %v", err)
 		}
 	}
-	// A per-request discovery fetch would make every MCP message pay an extra
+	// A per-request discovery fetch would charge every MCP message an extra
 	// round trip to the IdP.
 	if got := fi.discHits.Load(); got != 1 {
 		t.Errorf("discovery ran %d times across 3 requests, want 1", got)
 	}
-	// The JWKS is likewise cached by the remote key set.
+	// The remote key set caches the JWKS the same way.
 	if got := fi.jwksHits.Load(); got > 1 {
 		t.Errorf("jwks fetched %d times, want at most 1", got)
 	}
 }
 
 func TestOIDCFailedDiscoveryIsNotCached(t *testing.T) {
-	// A momentarily-down IdP must not permanently break the gateway: caching a
+	// An IdP down for a moment must not break the gateway for good: caching a
 	// discovery failure would keep rejecting every request until a restart.
 	fi := newFakeIssuer(t)
 	fi.discDown.Store(true)
@@ -340,16 +340,16 @@ func TestOIDCMissingCredential(t *testing.T) {
 	if !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("error %v does not wrap ErrUnauthenticated", err)
 	}
-	// No credential means no reason to talk to the IdP at all.
+	// No credential means no reason to talk to the IdP.
 	if got := fi.discHits.Load(); got != 0 {
 		t.Errorf("discovery ran %d times for a credential-less request, want 0", got)
 	}
 }
 
 func TestOIDCJWKSOutageFailsClosed(t *testing.T) {
-	// Discovery succeeds but the key set is unreachable: with no key to check
-	// the signature against, the request must be rejected rather than admitted
-	// on the strength of unverified claims.
+	// Discovery succeeds but the key set is unreachable. With no key to check
+	// the signature against, the gateway must reject the request instead of
+	// admitting it on unverified claims.
 	fi := newFakeIssuer(t)
 	fi.jwksDown.Store(true)
 
@@ -369,9 +369,9 @@ func TestOIDCJWKSOutageFailsClosed(t *testing.T) {
 }
 
 func TestOIDCConcurrentFirstRequests(t *testing.T) {
-	// Lazy discovery means the very first burst of requests races to
-	// initialize the verifier. Exactly one discovery must happen, and every
-	// request must still get a correct answer. Run under -race.
+	// Lazy discovery means the first burst of requests races to initialize
+	// the verifier. Exactly one discovery must happen, and every request must
+	// still get a correct answer. Run under -race.
 	fi := newFakeIssuer(t)
 	res, err := OIDC(OIDCOptions{Issuer: fi.srv.URL, HTTPClient: fi.srv.Client()})
 	if err != nil {

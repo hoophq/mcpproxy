@@ -5,19 +5,19 @@
 // It implements the subset of OAuth that the MCP authorization spec requires
 // and nothing more: RFC 8414 metadata discovery, RFC 7591 dynamic client
 // registration for public clients, authorization code with mandatory PKCE
-// (S256), and refresh tokens with rotation. Access tokens are ES256 JWTs the
-// gateway signs and verifies itself — ValidateToken is the inbound resolver
+// (S256), and refresh tokens with rotation. The gateway signs and verifies
+// its own access tokens as ES256 JWTs; ValidateToken is the inbound resolver
 // when auth_server is enabled.
 //
-// Login is either local (no upstream configured: everyone becomes a fixed dev
-// identity, which the server warns loudly about) or federated to a company
-// OIDC provider. In the federated case the upstream access token is retained
-// per subject so backends configured for token swap can call downstream APIs
-// as the user; see swap.go.
+// Login runs one of two ways. With no upstream configured, every caller
+// becomes a fixed dev identity and the server logs a warning at every
+// startup. Federated to a company OIDC provider, the server retains the
+// upstream access token per subject so backends configured for token swap
+// can call downstream APIs as the user; see swap.go.
 //
-// All state is in memory. Restarting the gateway invalidates outstanding
-// codes, refresh tokens and upstream tokens, and access tokens survive only if
-// a signing key file was configured.
+// All state lives in memory. Restarting the gateway invalidates outstanding
+// codes, refresh tokens and upstream tokens; access tokens survive only when
+// an operator configured a signing key file.
 package authserver
 
 import (
@@ -41,13 +41,13 @@ import (
 // defaultAccessTokenTTL applies when config.AuthServer.AccessTokenTTL is zero.
 const defaultAccessTokenTTL = time.Hour
 
-// refreshTokenTTL bounds an idle session. Rotation on every use means an
-// active client keeps extending it; an abandoned one dies here.
+// refreshTokenTTL bounds an idle session. Rotation on every use lets an
+// active client keep extending it; an abandoned one expires here.
 const refreshTokenTTL = 30 * 24 * time.Hour
 
-// maxRegisterBody caps the DCR request body. Generous for a legitimate client
-// metadata document, small enough that an unauthenticated endpoint cannot be
-// used to make us buffer megabytes.
+// maxRegisterBody caps the DCR request body: room for a legitimate client
+// metadata document, tight enough that an unauthenticated endpoint cannot
+// make the gateway buffer megabytes.
 const maxRegisterBody = 64 * 1024
 
 // devSubject is the identity handed out when no upstream IdP is configured.
@@ -68,8 +68,8 @@ type Server struct {
 	now func() time.Time
 }
 
-// New builds a Server from configuration. upstream may be nil, which selects
-// local auto-approval; construct one with NewOIDCFederator to federate.
+// New builds a Server from configuration. A nil upstream selects local
+// auto-approval; pass one from NewOIDCFederator to federate.
 func New(cfg config.AuthServer, upstream UpstreamFederator) (*Server, error) {
 	issuer := strings.TrimSuffix(cfg.Issuer, "/")
 	if issuer == "" {
@@ -118,9 +118,9 @@ func New(cfg config.AuthServer, upstream UpstreamFederator) (*Server, error) {
 // Issuer returns the external URL clients see this server as.
 func (s *Server) Issuer() string { return s.issuer }
 
-// Routes returns the OAuth endpoints. Mount it at the gateway's root: the
-// paths are fixed because RFC 8414 pins the well-known locations and clients
-// read the rest out of the metadata document.
+// Routes returns the OAuth endpoints. Mount it at the gateway's root. The
+// paths are fixed: RFC 8414 pins the well-known locations, and clients read
+// the rest out of the metadata document.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleMetadata)
@@ -156,10 +156,10 @@ func (s *Server) handleMetadata(w http.ResponseWriter, _ *http.Request) {
 
 		ResponseTypesSupported: []string{"code"},
 		GrantTypesSupported:    []string{"authorization_code", "refresh_token"},
-		// S256 only. OAuth 2.1 forbids "plain", and every MCP client library
-		// supports S256.
+		// S256 only. OAuth 2.1 forbids "plain", and MCP client libraries
+		// support S256.
 		CodeChallengeMethodsSupported: []string{"S256"},
-		// "none": all our clients are public and authenticate with PKCE.
+		// "none": these clients are public and authenticate with PKCE.
 		TokenEndpointAuthMethodsSupported: []string{"none"},
 		IDTokenSigningAlgValuesSupported:  []string{"ES256"},
 	})
@@ -171,8 +171,8 @@ func (s *Server) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(s.jwks)
 }
 
-// registrationRequest is the RFC 7591 client metadata we read. Everything else
-// in the document is accepted and ignored.
+// registrationRequest is the RFC 7591 client metadata the server reads. It
+// accepts and ignores everything else in the document.
 type registrationRequest struct {
 	RedirectURIs  []string `json:"redirect_uris"`
 	ClientName    string   `json:"client_name,omitempty"`
@@ -243,12 +243,11 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 // caller's identity. It is the gateway's inbound IdentityResolver when
 // auth_server is enabled; Resolver adapts it to that signature.
 //
-// The audience is deliberately not checked. `aud` holds the client id that
-// obtained the token, and every such token is meant for exactly one resource
-// — this gateway — so there is no second audience to confuse it with. Pinning
-// it to a fixed value would instead break dynamic registration, where client
-// ids are minted per client at runtime. Issuer and signature already bind the
-// token to this server.
+// The server does not check the audience. `aud` holds the client id that
+// obtained the token, and each token targets one resource, this gateway, so
+// no second audience exists to confuse it with. Pinning aud to a fixed value
+// would break dynamic registration, which mints client ids per client at
+// runtime. Issuer and signature already bind the token to this server.
 func (s *Server) ValidateToken(_ context.Context, raw string) (inspect.Identity, error) {
 	raw = strings.TrimSpace(strings.TrimPrefix(raw, "Bearer "))
 	if raw == "" {
@@ -256,9 +255,9 @@ func (s *Server) ValidateToken(_ context.Context, raw string) (inspect.Identity,
 	}
 
 	claims := jwt.MapClaims{}
-	// Pinning ES256 is what stops the alg-confusion family of attacks: without
-	// it a token claiming alg=none or alg=HS256 (keyed on our public key)
-	// would be handed to a verifier that trusts the header.
+	// Pinning ES256 stops the alg-confusion family of attacks. Without it, a
+	// token claiming alg=none or alg=HS256 (keyed on this server's public
+	// key) would reach a verifier that trusts the header.
 	_, err := jwt.NewParser(
 		jwt.WithValidMethods([]string{"ES256"}),
 		jwt.WithIssuer(s.issuer),
@@ -288,9 +287,9 @@ func (s *Server) Resolver(r *http.Request) (inspect.Identity, error) {
 	return s.ValidateToken(r.Context(), h)
 }
 
-// UpstreamTokens returns the upstream IdP tokens held for a subject. Absent
-// when no upstream is configured or the user has not logged in since the last
-// restart.
+// UpstreamTokens returns the upstream IdP tokens held for a subject. They are
+// absent when no upstream is configured, or when the user has not logged in
+// since the last restart.
 func (s *Server) UpstreamTokens(subject string) (*outbound.Token, bool) {
 	t, ok := s.store.getUpstream(subject)
 	return t, ok

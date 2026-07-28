@@ -16,15 +16,15 @@ type tokenResponse struct {
 	Scope        string `json:"scope,omitempty"`
 }
 
-// handleToken implements POST /token for the two grants we advertise.
+// handleToken implements POST /token for the two grants the server advertises.
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "could not parse form body")
 		return
 	}
-	// Opportunistic GC: the token endpoint is the one route every live client
-	// hits regularly, so it is a free place to expire abandoned state without
-	// running a background goroutine.
+	// Opportunistic GC: every live client hits the token endpoint on a
+	// schedule, making it a free place to expire abandoned state without a
+	// background goroutine.
 	s.store.sweep(s.now())
 
 	switch r.PostForm.Get("grant_type") {
@@ -48,8 +48,8 @@ func (s *Server) authorizationCodeGrant(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// takeCode deletes the code, so a replay lands here and fails — which is
-	// the whole point of one-time codes.
+	// takeCode deletes the code, so a replay lands here and fails, which is
+	// the point of one-time codes.
 	g, ok := s.store.takeCode(code, s.now())
 	if !ok {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "authorization code is unknown, used or expired")
@@ -84,8 +84,8 @@ func (s *Server) refreshTokenGrant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Rotation: takeRefresh consumes the presented token and issueTokens mints
-	// a new one, so a stolen refresh token is usable at most once and the
-	// legitimate client's next refresh fails visibly.
+	// a new one, so a stolen refresh token works at most once and the
+	// legitimate client's next refresh fails in the open.
 	rg, ok := s.store.takeRefresh(presented, s.now())
 	if !ok {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "refresh token is unknown, used or expired")
@@ -95,8 +95,8 @@ func (s *Server) refreshTokenGrant(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "refresh token was not issued to this client")
 		return
 	}
-	// A refresh request may narrow scope but never widen it (RFC 6749 §6). We
-	// only support asking for the same scope or omitting it.
+	// A refresh request may narrow scope but never widen it (RFC 6749 §6).
+	// This server takes the same scope or no scope parameter.
 	scope := rg.Scope
 	if want := f.Get("scope"); want != "" && want != rg.Scope {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_scope", "refresh cannot change the granted scope")
@@ -139,9 +139,9 @@ func (s *Server) issueTokens(w http.ResponseWriter, clientID, subject, email, sc
 	})
 }
 
-// signAccessToken builds the JWT the gateway will later verify in
-// ValidateToken. The audience is the client id: these tokens are for calling
-// this gateway on behalf of that client, and nothing else should accept them.
+// signAccessToken builds the JWT the gateway verifies later in ValidateToken.
+// The audience is the client id: these tokens call this gateway on behalf of
+// that client, and nothing else should accept them.
 func (s *Server) signAccessToken(clientID, subject, email, scope string, now time.Time) (string, error) {
 	claims := jwt.MapClaims{
 		"iss": s.issuer,

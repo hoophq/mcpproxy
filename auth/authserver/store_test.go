@@ -45,8 +45,8 @@ func TestSweepDropsOnlyExpiredState(t *testing.T) {
 		t.Error("sweep dropped a live refresh token")
 	}
 
-	// Upstream tokens are keyed by subject and outlive individual grants:
-	// a user's backend access must not die because they stopped refreshing.
+	// Upstream tokens are keyed by subject and outlive individual grants: a
+	// user's backend access must survive their pause in refreshing.
 	s.putUpstream("alice", &outbound.Token{AccessToken: "t"})
 	s.sweep(base.Add(365 * 24 * time.Hour))
 	if _, ok := s.getUpstream("alice"); !ok {

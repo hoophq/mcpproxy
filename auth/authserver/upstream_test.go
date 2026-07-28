@@ -17,9 +17,9 @@ import (
 )
 
 // fakeIdP is a minimal OIDC provider: discovery, an authorization endpoint
-// that redirects straight back (no login UI), and a token endpoint returning
-// an unsigned ID token. Unsigned is faithful to what the code under test
-// does — Exchange reads the ID token's claims without verifying the signature,
+// that redirects straight back with no login UI, and a token endpoint
+// returning an unsigned ID token. Unsigned matches what the code under test
+// does. Exchange reads the ID token's claims without verifying the signature,
 // trusting the authenticated TLS channel to the token endpoint instead.
 type fakeIdP struct {
 	server *httptest.Server
@@ -65,7 +65,7 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 	})
 	mux.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
 		idp.lastAuthQuery = r.URL.Query()
-		// Immediately bounce back with a code, as if the user had logged in.
+		// Bounce back with a code, as if the user had logged in.
 		back, _ := url.Parse(r.URL.Query().Get("redirect_uri"))
 		q := back.Query()
 		q.Set("code", "upstream-code")
@@ -110,7 +110,7 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 }
 
 // unsignedJWT builds a JWT with an empty signature: enough structure for a
-// claims parse, and provably not a signature-verification test.
+// claims parse, and no pretense of exercising signature verification.
 func unsignedJWT(claims map[string]any) string {
 	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 	payload, _ := json.Marshal(claims)
@@ -127,8 +127,9 @@ func newFederatedHarness(t *testing.T) *federatedHarness {
 	t.Helper()
 	idp := newFakeIdP(t)
 
-	// The gateway's own listener must exist before we can name its /callback
-	// URL to the federator, so start it empty and install the handler after.
+	// The gateway's own listener must exist before anything can name its
+	// /callback URL to the federator, so start it empty and install the
+	// handler after.
 	gw := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(gw.Close)
 
@@ -161,11 +162,11 @@ func newFederatedHarness(t *testing.T) *federatedHarness {
 	}
 }
 
-// login walks the whole federated flow and returns the token response.
+// login walks the federated flow end to end and returns the token response.
 func (h *federatedHarness) login(clientID, redirectURI, verifier, challenge string) tokenResponse {
 	h.t.Helper()
 
-	// /authorize must bounce us to the IdP, not to the client.
+	// /authorize must bounce the caller to the IdP rather than the client.
 	toIdP := h.authorize(url.Values{
 		"response_type":         {"code"},
 		"client_id":             {clientID},
@@ -178,7 +179,7 @@ func (h *federatedHarness) login(clientID, redirectURI, verifier, challenge stri
 		h.t.Fatalf("authorize redirected to %s, want the upstream IdP at %s", toIdP, h.idp.server.URL)
 	}
 
-	// Follow the IdP redirect back to our /callback.
+	// Follow the IdP redirect back to the gateway's /callback.
 	idpResp, err := h.client.Get(toIdP.String())
 	if err != nil {
 		h.t.Fatalf("GET upstream authorize: %v", err)
@@ -233,7 +234,7 @@ func TestFederatedLoginExtractsIdentityAndKeepsUpstreamTokens(t *testing.T) {
 
 	tok := h.login(clientID, redirectURI, verifier, challenge)
 
-	// The upstream authorize request must have been well-formed.
+	// The upstream authorize request must be well-formed.
 	if got := h.idp.lastAuthQuery.Get("client_id"); got != "gateway-client" {
 		t.Errorf("upstream client_id = %q, want gateway-client", got)
 	}
@@ -252,7 +253,8 @@ func TestFederatedLoginExtractsIdentityAndKeepsUpstreamTokens(t *testing.T) {
 		t.Errorf("upstream scope = %q, want the configured profile scope", scope)
 	}
 
-	// Our access token must carry the upstream identity, namespaced by issuer.
+	// The gateway's access token must carry the upstream identity,
+	// namespaced by issuer.
 	wantSubject := h.idp.server.URL + "#" + h.idp.subject
 	id, err := h.srv.ValidateToken(context.Background(), tok.AccessToken)
 	if err != nil {
@@ -265,7 +267,7 @@ func TestFederatedLoginExtractsIdentityAndKeepsUpstreamTokens(t *testing.T) {
 		t.Errorf("email = %q, want %q", id.Email, h.idp.email)
 	}
 
-	// The upstream tokens must be retained under that subject.
+	// The server must retain the upstream tokens under that subject.
 	up, ok := h.srv.UpstreamTokens(wantSubject)
 	if !ok {
 		t.Fatalf("no upstream tokens stored for %q", wantSubject)
@@ -277,7 +279,7 @@ func TestFederatedLoginExtractsIdentityAndKeepsUpstreamTokens(t *testing.T) {
 		t.Errorf("upstream refresh token = %q, want %q", up.RefreshToken, h.idp.refreshToken)
 	}
 
-	// And the swap source must hand that token to a backend call.
+	// The swap source must hand that token to a backend call.
 	src := NewUpstreamSwapSource(h.srv)
 	got, err := src(outbound.WithUser(context.Background(), wantSubject))
 	if err != nil {

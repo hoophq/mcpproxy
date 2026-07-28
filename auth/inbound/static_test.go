@@ -50,8 +50,8 @@ func TestStatic(t *testing.T) {
 }
 
 func TestStaticRequiresNonEmptyToken(t *testing.T) {
-	// An empty configured token would otherwise authenticate every caller that
-	// sends "Bearer " — the worst possible failure mode.
+	// An empty configured token would authenticate every caller that sends
+	// "Bearer ", the worst failure mode this package has.
 	if _, err := Static(""); err == nil {
 		t.Fatal("want error for empty token")
 	}

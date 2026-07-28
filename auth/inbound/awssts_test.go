@@ -15,10 +15,10 @@ import (
 func amzTime(t time.Time) string { return t.UTC().Format("20060102T150405Z") }
 
 // presign builds a URL shaped like a real SigV4-presigned
-// sts:GetCallerIdentity call. The signature is not verifiable locally — the
-// gateway never checks it, AWS does — so any non-empty value serves. The
-// timestamp is stamped at call time so the URL is fresh against the default
-// clock; tests that care about staleness override X-Amz-Date and Now.
+// sts:GetCallerIdentity call. Nothing here verifies the signature: the
+// gateway defers that to AWS, so any non-empty value serves. The timestamp
+// is stamped at call time so the URL is fresh against the default clock;
+// tests that care about staleness override X-Amz-Date and Now.
 func presign(host string, override map[string]string) string {
 	q := url.Values{
 		"Action":               {"GetCallerIdentity"},
@@ -186,8 +186,8 @@ func TestAWSSTSMappingOrderIsDeterministic(t *testing.T) {
 
 func TestAWSSTSRejectsUnmappedPrincipal(t *testing.T) {
 	// An AWS identity with no mapping is an unknown principal; admitting it
-	// under some default subject would silently grant access to any AWS
-	// account in the world.
+	// under some default subject would hand access to any AWS account that
+	// can reach the gateway.
 	s := newFakeSTS(t, "arn:aws:sts::999999999999:assumed-role/Stranger/x")
 	res, err := AWSSTS(AWSSTSOptions{
 		RoleMappings: map[string]string{"arn:aws:sts::123456789012:assumed-role/Deploy/*": "deployer"},
@@ -333,8 +333,8 @@ func TestAWSSTSUpstreamFailures(t *testing.T) {
 			if err == nil {
 				t.Fatal("want failure")
 			}
-			// A 5xx means AWS is broken, not that the caller is unauthorized;
-			// conflating them would hide outages behind 401s.
+			// A 5xx means AWS is broken while the caller's credential may be
+			// fine; conflating the two would hide outages behind 401s.
 			if got := errors.Is(err, ErrUnauthenticated); got != tc.wantAuthFail {
 				t.Errorf("errors.Is(err, ErrUnauthenticated) = %v, want %v (err: %v)", got, tc.wantAuthFail, err)
 			}
@@ -396,8 +396,8 @@ func TestParseARN(t *testing.T) {
 			role: "Gov", session: "sess", account: "123456789012", part: "aws-us-gov",
 		},
 		{
-			// A session name may itself contain slashes; everything after the
-			// role belongs to the session.
+			// A session name may contain slashes; everything after the role
+			// belongs to the session.
 			arn:  "arn:aws:sts::123456789012:assumed-role/Deploy/a/b/c",
 			role: "Deploy", session: "a/b/c", account: "123456789012", part: "aws",
 		},
@@ -434,8 +434,8 @@ func TestParseARN(t *testing.T) {
 }
 
 func TestExpandTemplateLeavesUnknownPlaceholders(t *testing.T) {
-	// A typo must be visible in the resolved subject rather than silently
-	// collapsing distinct principals onto one identity.
+	// A typo must show up in the resolved subject rather than collapsing
+	// distinct principals onto one identity.
 	p := arnParts{full: "arn:aws:sts::1:assumed-role/R/S", role: "R", session: "S", account: "1"}
 	if got := expandTemplate("{role}-{nope}", p); got != "R-{nope}" {
 		t.Errorf("got %q, want %q", got, "R-{nope}")
@@ -447,7 +447,7 @@ func TestExpandTemplateLeavesUnknownPlaceholders(t *testing.T) {
 
 func TestAWSSTSExpiryCapIsFifteenMinutes(t *testing.T) {
 	// Guards the constant itself: a presigned URL is a bearer credential, so
-	// widening this silently would extend every leak's blast radius.
+	// widening this would extend the blast radius of every leak.
 	if maxPresignedExpiry != 15*time.Minute {
 		t.Fatalf("maxPresignedExpiry = %v, want 15m", maxPresignedExpiry)
 	}
@@ -469,9 +469,9 @@ func TestAWSSTSExpiryCapIsFifteenMinutes(t *testing.T) {
 }
 
 func TestAWSSTSFreshness(t *testing.T) {
-	// A presigned URL is a bearer credential. Rejecting a stale one locally
-	// costs no round trip and closes the window a leaked URL stays usable,
-	// even if AWS would still honour it.
+	// A presigned URL is a bearer credential. Rejecting a stale one in the
+	// gateway costs no round trip and shortens the window a leaked URL stays
+	// usable, even where AWS would still honour it.
 	signedAt := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	cases := []struct {
 		name string
@@ -513,7 +513,7 @@ func TestAWSSTSFreshness(t *testing.T) {
 			if !errors.Is(err, ErrUnauthenticated) {
 				t.Errorf("error %v does not wrap ErrUnauthenticated", err)
 			}
-			// Staleness is decided locally, before any network hop.
+			// The gateway decides staleness before any network hop.
 			if n := s.calls.Load(); n != 0 {
 				t.Errorf("STS called %d times for a stale URL, want 0", n)
 			}

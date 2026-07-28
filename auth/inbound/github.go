@@ -12,23 +12,25 @@ import (
 	"github.com/hoophq/mcpproxy/inspect"
 )
 
-// DefaultGitHubAPI is the GitHub.com REST API root. GitHub Enterprise Server is
-// not a supported target: its token formats and org semantics differ enough
-// that pointing this at one would silently weaken the org allowlist.
+// DefaultGitHubAPI is the GitHub.com REST API root. GitHub Enterprise Server
+// is not a supported target: its token formats and org semantics differ
+// enough that pointing this at one would weaken the org allowlist with no
+// visible failure.
 const DefaultGitHubAPI = "https://api.github.com"
 
-// githubCacheTTL bounds how long a validated token is trusted without
+// githubCacheTTL bounds how long the gateway trusts a validated token without
 // re-asking GitHub. Five minutes keeps a revoked token's window short while
-// cutting per-request API calls to roughly nothing under normal MCP traffic
-// (which issues many messages per session).
+// cutting per-request API calls to near zero under MCP traffic, which issues
+// many messages per session.
 const githubCacheTTL = 5 * time.Minute
 
 // GitHubOptions configures GitHub personal-access/OAuth token validation.
 type GitHubOptions struct {
 	// AllowedOrgs, when non-empty, requires the caller to be a member of at
-	// least one listed organization. Membership is read from /user/orgs,
-	// which only lists orgs the token itself can see: a token without the
-	// read:org scope will appear to belong to no orgs and be rejected.
+	// least one listed organization. The gateway reads membership from
+	// /user/orgs, which lists only orgs the token itself can see: a token
+	// without the read:org scope appears to belong to no orgs and is
+	// rejected.
 	AllowedOrgs []string
 	// BaseURL overrides the API root. Tests point this at an httptest server.
 	BaseURL string
@@ -55,8 +57,8 @@ type githubEntry struct {
 // githubValidator validates tokens against the GitHub API with a short-lived
 // positive cache.
 //
-// Failures are never cached: a token rejected because GitHub was briefly
-// unreachable must not stay rejected for five minutes.
+// The cache holds successes only: a token rejected because GitHub was
+// unreachable for a moment must not stay rejected for five minutes.
 type githubValidator struct {
 	client  *http.Client
 	baseURL string
@@ -70,10 +72,11 @@ type githubValidator struct {
 // GitHub validates `Authorization: Bearer <github token>` by calling the
 // GitHub API as that token and adopting the resulting user as the identity.
 //
-// There is no offline check: GitHub tokens are opaque, so the API round-trip
-// is the validation. Token prefixes (ghp_, gho_, github_pat_) are not screened
-// because GitHub keeps minting new ones and a prefix allowlist would reject
-// valid credentials for no security gain — an invalid token simply 401s.
+// The gateway has no offline check: GitHub tokens are opaque, so the API
+// round-trip is the validation. It does not screen token prefixes (ghp_,
+// gho_, github_pat_), because GitHub keeps minting new ones and a prefix
+// allowlist would reject valid credentials for no security gain. An invalid
+// token 401s.
 func GitHub(opts GitHubOptions) Resolver {
 	v := &githubValidator{
 		client:  opts.HTTPClient,
@@ -169,8 +172,8 @@ func (v *githubValidator) validate(r *http.Request, tok string) (inspect.Identit
 }
 
 // get performs an authenticated GET against the GitHub API and decodes JSON
-// into out. Non-200 responses become unauthenticated errors, except 5xx, which
-// signal that GitHub — not the credential — is the problem.
+// into out. Non-200 responses become unauthenticated errors, except 5xx,
+// which points at GitHub rather than the credential.
 func (v *githubValidator) get(r *http.Request, tok, path string, out any) error {
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, v.baseURL+path, nil)
 	if err != nil {
@@ -186,8 +189,8 @@ func (v *githubValidator) get(r *http.Request, tok, path string, out any) error 
 	}
 	defer resp.Body.Close()
 
-	// Bound the read: a hostile or misconfigured BaseURL should not be able to
-	// stream unbounded data into the gateway's heap.
+	// Bound the read: a hostile or misconfigured BaseURL must not stream
+	// unbounded data into the gateway's heap.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return fmt.Errorf("inbound github: reading %s: %w", path, err)

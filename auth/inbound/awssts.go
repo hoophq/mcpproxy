@@ -32,9 +32,9 @@ type AWSSTSOptions struct {
 	// Templates may reference {arn}, {account}, {role}, {session},
 	// {partition}, and {service}.
 	RoleMappings map[string]string
-	// Endpoint overrides where the presigned request is actually sent. The
-	// allowlist still runs against the URL the caller presented, so this only
-	// redirects the network hop (tests point it at an httptest server).
+	// Endpoint overrides where the gateway sends the presigned request. The
+	// allowlist still runs against the URL the caller presented, so this
+	// redirects only the network hop (tests point it at an httptest server).
 	Endpoint string
 	// HTTPClient overrides the client used to execute the presigned request.
 	HTTPClient *http.Client
@@ -71,14 +71,14 @@ type roleMapping struct {
 // AWSSTS authenticates a caller by replaying the presigned
 // sts:GetCallerIdentity URL they sent in PresignedHeader.
 //
-// Why this works: only a holder of the AWS credentials can produce a valid
-// SigV4 signature over that URL, and STS answers it with the signer's own ARN.
-// The gateway needs no AWS credentials of its own and performs no role
-// assumption — it just asks AWS "who signed this?" and trusts the answer.
+// Only a holder of the AWS credentials can produce a valid SigV4 signature
+// over that URL, and STS answers it with the signer's own ARN. The gateway
+// needs no AWS credentials of its own and performs no role assumption: it
+// asks AWS "who signed this?" and trusts the answer.
 //
-// The URL's host is checked against the STS allowlist *before* the request is
-// sent, so a caller cannot turn this into an SSRF primitive by presigning a URL
-// that points at an internal service.
+// The gateway checks the URL's host against the STS allowlist *before*
+// sending the request, so a caller cannot turn this into an SSRF primitive
+// by presigning a URL that points at an internal service.
 func AWSSTS(opts AWSSTSOptions) (Resolver, error) {
 	if len(opts.RoleMappings) == 0 {
 		return nil, fmt.Errorf("inbound awssts: at least one aws_role_mappings entry is required")
@@ -167,15 +167,16 @@ func validatePresigned(raw string, now time.Time) (*url.URL, error) {
 	return u, nil
 }
 
-// checkFreshness enforces the presigned URL's lifetime locally.
+// checkFreshness enforces the presigned URL's lifetime in the gateway.
 //
-// AWS also rejects an expired signature, so this is belt-and-braces — but it
-// rejects a stale credential without spending a network round trip, and it
-// caps the lifetime at maxPresignedExpiry, which AWS will happily exceed
-// (SigV4 permits up to seven days).
+// AWS rejects an expired signature too, so this check is redundant for that
+// case. It still earns its keep: it rejects a stale credential without
+// spending a network round trip, and it caps the lifetime at
+// maxPresignedExpiry, which AWS lets reach seven days.
 //
-// An absent X-Amz-Date is tolerated: SigV4 allows the timestamp to travel in a
-// signed Date header instead, and AWS remains the authority on the signature.
+// The gateway tolerates an absent X-Amz-Date: SigV4 allows the timestamp to
+// travel in a signed Date header instead, and AWS remains the authority on
+// the signature.
 func checkFreshness(amzDate, amzExpires string, now time.Time) error {
 	if amzExpires == "" {
 		return nil
@@ -196,8 +197,8 @@ func checkFreshness(amzDate, amzExpires string, now time.Time) error {
 	if err != nil {
 		return fmt.Errorf("%w: invalid X-Amz-Date %q", ErrUnauthenticated, amzDate)
 	}
-	// clockSkew absorbs disagreement between the caller's clock and ours; the
-	// same allowance AWS itself grants for SigV4 timestamps.
+	// clockSkew absorbs disagreement between the caller's clock and ours, the
+	// same allowance AWS grants for SigV4 timestamps.
 	const clockSkew = 5 * time.Minute
 	if now.After(signedAt.Add(lifetime + clockSkew)) {
 		return fmt.Errorf("%w: presigned URL expired at %s", ErrUnauthenticated, signedAt.Add(lifetime).UTC())
@@ -211,9 +212,8 @@ func checkFreshness(amzDate, amzExpires string, now time.Time) error {
 // isSTSHost reports whether host is sts.amazonaws.com or a regional
 // sts.<region>.amazonaws.com in any partition.
 //
-// The check is a strict suffix/shape match rather than a substring search:
-// "sts.amazonaws.com.attacker.example" contains the global host as a substring
-// and must not pass.
+// A substring search would pass "sts.amazonaws.com.attacker.example", which
+// contains the global host, so this matches on suffix and label shape.
 func isSTSHost(host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	switch host {
@@ -243,7 +243,7 @@ func callSTS(r *http.Request, client *http.Client, u *url.URL, endpoint string) 
 	target := u.String()
 	if endpoint != "" {
 		// Redirect the hop while preserving the signed query string. The URL
-		// the caller presented has already passed the allowlist.
+		// the caller presented already passed the allowlist.
 		redirected := *u
 		ep, err := url.Parse(endpoint)
 		if err != nil {
@@ -271,8 +271,8 @@ func callSTS(r *http.Request, client *http.Client, u *url.URL, endpoint string) 
 		return nil, fmt.Errorf("inbound awssts: reading STS response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		// STS answers 403 for a bad signature and 400 for an expired one; both
-		// mean the caller's credential is the problem, not AWS.
+		// STS answers 403 for a bad signature and 400 for an expired one;
+		// both point at the caller's credential rather than an AWS outage.
 		if resp.StatusCode >= 500 {
 			return nil, fmt.Errorf("inbound awssts: STS returned %s (upstream failure)", resp.Status)
 		}
@@ -321,9 +321,9 @@ func parseARN(arn string) (arnParts, error) {
 //
 // Go map iteration is randomized, so evaluating mappings in map order would
 // make the resolved subject nondeterministic whenever two patterns overlap.
-// Ordering by specificity — fewest wildcards, then longest pattern — makes
-// "arn:aws:sts::1234:assumed-role/Admin/*" win over "arn:aws:sts::*", which is
-// the intuitive reading of an overlapping allowlist.
+// Sorting by specificity (fewest wildcards, then longest pattern) lets
+// "arn:aws:sts::1234:assumed-role/Admin/*" win over "arn:aws:sts::*", the
+// reading an operator expects from an overlapping allowlist.
 func compileRoleMappings(m map[string]string) ([]roleMapping, error) {
 	out := make([]roleMapping, 0, len(m))
 	for pattern, template := range m {
@@ -360,8 +360,8 @@ func applyMappings(mappings []roleMapping, p arnParts) (subject, pattern string,
 }
 
 // expandTemplate substitutes {placeholder} references in a subject template.
-// Unknown placeholders are left verbatim so a typo surfaces in audit logs
-// instead of silently collapsing two principals onto one subject.
+// Unknown placeholders stay verbatim so a typo surfaces in audit logs
+// instead of collapsing two principals onto one subject.
 func expandTemplate(tmpl string, p arnParts) string {
 	if !strings.ContainsRune(tmpl, '{') {
 		return tmpl

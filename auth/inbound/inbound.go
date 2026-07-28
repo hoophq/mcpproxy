@@ -3,8 +3,8 @@
 //
 // Each mode is an independent constructor returning a Resolver; New dispatches
 // on config.Inbound.Mode so the daemon does not have to switch on strings.
-// Resolvers are called on every request from many goroutines and must be
-// safe for concurrent use.
+// The gateway calls a Resolver on every request from many goroutines, so a
+// Resolver must be safe for concurrent use.
 package inbound
 
 import (
@@ -18,13 +18,13 @@ import (
 )
 
 // Resolver authenticates an HTTP request and yields the caller identity. It is
-// an alias (not a defined type) so a Resolver is directly assignable to
+// an alias rather than a defined type, so a Resolver is assignable to
 // gateway.IdentityResolver without importing the gateway package here.
 type Resolver = func(r *http.Request) (inspect.Identity, error)
 
-// ErrUnauthenticated is the root of every credential-rejection error returned
-// by a Resolver. The gateway turns any resolver error into a 401, but callers
-// that need to distinguish "bad credential" from "auth backend broken" can use
+// ErrUnauthenticated is the root of every credential-rejection error a
+// Resolver returns. The gateway turns any resolver error into a 401; callers
+// that need to tell "bad credential" from "auth backend broken" apart can use
 // errors.Is against this.
 var ErrUnauthenticated = errors.New("unauthenticated")
 
@@ -58,8 +58,8 @@ func New(cfg config.Inbound) (Resolver, error) {
 }
 
 // bearerToken extracts the credential from an RFC 6750 Authorization header.
-// The scheme comparison is case-insensitive because RFC 7235 defines auth
-// schemes as case-insensitive tokens and real clients send "bearer".
+// The comparison ignores scheme case: RFC 7235 defines auth schemes as
+// case-insensitive tokens, and real clients send "bearer".
 func bearerToken(r *http.Request) (string, error) {
 	h := r.Header.Get("Authorization")
 	if h == "" {
@@ -77,12 +77,13 @@ func bearerToken(r *http.Request) (string, error) {
 }
 
 // globMatch reports whether s matches a shell-style pattern where '*' spans any
-// run of characters (including '/' and ':') and '?' matches exactly one.
+// run of characters (including '/' and ':') and '?' matches a single one.
 //
 // path.Match is unusable here: it treats '/' as a segment separator, so
 // "arn:aws:sts::*:assumed-role/*" would never match a three-segment
-// assumed-role ARN. The implementation is an iterative two-pointer matcher with
-// backtracking: O(len(pattern)*len(s)) worst case, no recursion on hostile input.
+// assumed-role ARN. This is an iterative two-pointer matcher with
+// backtracking: O(len(pattern)*len(s)) worst case, no recursion on hostile
+// input.
 func globMatch(pattern, s string) bool {
 	var (
 		p, i  int

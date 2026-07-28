@@ -9,9 +9,10 @@ import (
 // WellKnownPath is the RFC 9728 protected-resource metadata path.
 const WellKnownPath = "/.well-known/oauth-protected-resource"
 
-// protectedResourceMetadata is the RFC 9728 document. Only the two required
-// fields are emitted: MCP clients use them to find the authorization server,
-// and advertising scopes the gateway does not enforce would be a lie.
+// protectedResourceMetadata is the RFC 9728 document. It carries the two
+// required fields and nothing else: MCP clients use them to find the
+// authorization server, and advertising scopes the gateway does not enforce
+// would be a lie.
 type protectedResourceMetadata struct {
 	Resource             string   `json:"resource"`
 	AuthorizationServers []string `json:"authorization_servers"`
@@ -20,16 +21,17 @@ type protectedResourceMetadata struct {
 // WellKnownHandler serves RFC 9728 protected-resource metadata, pointing MCP
 // clients at the authorization server that fronts this gateway.
 //
-// This is what makes unauthenticated MCP clients self-configure: they hit /mcp,
-// get 401 with WWW-Authenticate, fetch this document, discover authServerURL,
-// and run the OAuth flow against it without any manual setup.
+// Unauthenticated MCP clients self-configure from it. A client hits /mcp,
+// gets 401 with WWW-Authenticate, fetches this document, discovers
+// authServerURL, and runs the OAuth flow against it with no manual setup.
 //
-// Registered under the *prefix* /.well-known/oauth-protected-resource, because
-// RFC 9728 §3.1 allows clients to append the resource path (a client talking to
-// https://gw/mcp may request /.well-known/oauth-protected-resource/mcp). All
-// such subpaths describe the same resource, so they get the same document.
+// The daemon registers this under the *prefix*
+// /.well-known/oauth-protected-resource, because RFC 9728 §3.1 lets clients
+// append the resource path (a client talking to https://gw/mcp may request
+// /.well-known/oauth-protected-resource/mcp). All such subpaths describe the
+// same resource, so they get the same document.
 //
-// The endpoint is deliberately unauthenticated: requiring a token to learn how
+// The endpoint takes no credential by design: requiring a token to learn how
 // to get a token is a deadlock.
 func WellKnownHandler(issuer, authServerURL string) http.Handler {
 	body, err := json.Marshal(protectedResourceMetadata{
@@ -37,9 +39,9 @@ func WellKnownHandler(issuer, authServerURL string) http.Handler {
 		AuthorizationServers: []string{authServerURL},
 	})
 	if err != nil {
-		// Both fields are plain strings, so encoding cannot fail. Panicking in
-		// library code is banned, so degrade to an empty object rather than
-		// serving a truncated document.
+		// Both fields are plain strings, so encoding cannot fail. This
+		// package does not panic, so fall back to an empty object rather
+		// than serving a truncated document.
 		body = []byte(`{}`)
 	}
 
@@ -59,8 +61,8 @@ func WellKnownHandler(issuer, authServerURL string) http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		// Metadata is static for the process lifetime; let clients cache it
-		// instead of re-fetching before every token refresh.
+		// The metadata holds still for the process lifetime; let clients
+		// cache it instead of re-fetching before every token refresh.
 		w.Header().Set("Cache-Control", "public, max-age=3600")
 		w.WriteHeader(http.StatusOK)
 		if r.Method == http.MethodHead {

@@ -10,15 +10,15 @@ import (
 
 // Local attributes every request to the OS user running the daemon.
 //
-// This is for single-user desktop deployments where the gateway listens on
-// loopback and the only caller is the operator's own MCP client: there is no
-// credential to check, but audit records should carry a real name instead of
+// Single-user desktop deployments use this: the gateway listens on loopback
+// and the operator's own MCP client is the sole caller, so there is no
+// credential to check, yet audit records should carry a real name instead of
 // "anonymous". Binding this mode to a non-loopback address is a configuration
 // error; the resolver cannot detect that and does not try.
 //
-// The user is looked up once at construction. It cannot change for the life of
-// the process, and a per-request user.Current() would be a needless syscall on
-// the hot path.
+// Local looks the user up once at construction. The user cannot change for
+// the life of the process, and a per-request user.Current() would add a
+// syscall to the hot path for nothing.
 func Local() (Resolver, error) {
 	u, err := user.Current()
 	if err != nil {
@@ -27,7 +27,7 @@ func Local() (Resolver, error) {
 	subject := u.Username
 	if subject == "" {
 		// Some containerized environments return a passwd entry with no name;
-		// the numeric uid is still a stable, meaningful principal.
+		// the numeric uid still names a stable principal.
 		subject = u.Uid
 	}
 	id := inspect.Identity{

@@ -9,20 +9,20 @@ import (
 	"time"
 )
 
-// fakeGitHub is a stand-in for the GitHub REST API that records what the
-// resolver asked for and how it authenticated.
+// fakeGitHub stands in for the GitHub REST API and records what the resolver
+// asked for and how it authenticated.
 type fakeGitHub struct {
 	srv *httptest.Server
-	// validToken is the only credential the fake accepts.
+	// validToken is the sole credential the fake accepts.
 	validToken string
-	// orgs is what /user/orgs returns for the valid token.
+	// orgs is the /user/orgs response for the valid token.
 	orgs []string
-	// userCalls and orgCalls count endpoint hits, proving cache behaviour.
+	// userCalls and orgCalls count endpoint hits, which pin down cache behaviour.
 	userCalls atomic.Int64
 	orgCalls  atomic.Int64
 	// lastAuth records the Authorization header the resolver forwarded.
 	lastAuth atomic.Value
-	// fail, when set, makes every endpoint return this status.
+	// fail, when set, makes every endpoint return that status.
 	fail atomic.Int64
 }
 
@@ -94,12 +94,12 @@ func TestGitHubValidToken(t *testing.T) {
 	if id.Claims["provider"] != "github" {
 		t.Errorf("provider claim = %v, want github", id.Claims["provider"])
 	}
-	// The caller's own token must be forwarded: validating with a different
-	// credential would authenticate the wrong principal.
+	// The resolver must forward the caller's own token: validating with a
+	// different credential would authenticate the wrong principal.
 	if got := g.lastAuth.Load(); got != "Bearer ghp_valid" {
 		t.Errorf("forwarded auth = %v, want Bearer ghp_valid", got)
 	}
-	// Without an org allowlist there is no reason to spend an extra API call.
+	// Without an org allowlist, an extra API call buys nothing.
 	if n := g.orgCalls.Load(); n != 0 {
 		t.Errorf("/user/orgs called %d times with no allowlist, want 0", n)
 	}
@@ -175,7 +175,7 @@ func TestGitHubCachesValidatedTokens(t *testing.T) {
 		}
 	}
 	// An MCP session issues many messages; one API round trip per message
-	// would blow through GitHub's rate limit within minutes.
+	// would exhaust GitHub's rate limit within minutes.
 	if n := g.userCalls.Load(); n != 1 {
 		t.Errorf("/user called %d times within the TTL, want 1", n)
 	}
@@ -183,7 +183,7 @@ func TestGitHubCachesValidatedTokens(t *testing.T) {
 		t.Errorf("/user/orgs called %d times within the TTL, want 1", n)
 	}
 
-	// Just inside the TTL: still cached.
+	// Inside the TTL: still cached.
 	clock = clock.Add(githubCacheTTL - time.Second)
 	if _, err := res(req("ghp_valid")); err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -203,8 +203,8 @@ func TestGitHubCachesValidatedTokens(t *testing.T) {
 }
 
 func TestGitHubDoesNotCacheRejections(t *testing.T) {
-	// A token rejected because GitHub was briefly unavailable must be retried,
-	// not written off for the whole TTL.
+	// A token rejected because GitHub was unavailable for a moment must get a
+	// retry rather than a write-off for the whole TTL.
 	g := newFakeGitHub(t, "ghp_valid", nil)
 	g.fail.Store(http.StatusServiceUnavailable)
 	res := GitHub(GitHubOptions{BaseURL: g.srv.URL, HTTPClient: g.srv.Client()})
@@ -213,8 +213,8 @@ func TestGitHubDoesNotCacheRejections(t *testing.T) {
 	if err == nil {
 		t.Fatal("want failure while GitHub is down")
 	}
-	// A 5xx is GitHub's fault, not the caller's, so it must not be reported as
-	// an authentication failure.
+	// A 5xx points at GitHub rather than the caller, so the resolver must not
+	// report it as an authentication failure.
 	if errors.Is(err, ErrUnauthenticated) {
 		t.Errorf("upstream 503 reported as ErrUnauthenticated: %v", err)
 	}
@@ -252,8 +252,8 @@ func TestGitHubMissingCredential(t *testing.T) {
 }
 
 func TestGitHubConcurrentResolves(t *testing.T) {
-	// The gateway resolves identities on every inbound HTTP request, so the
-	// token cache is touched from many goroutines at once. Run under -race.
+	// The gateway resolves identities on every inbound HTTP request, so many
+	// goroutines touch the token cache at once. Run under -race.
 	g := newFakeGitHub(t, "ghp_valid", []string{"acme"})
 	res := GitHub(GitHubOptions{
 		BaseURL:     g.srv.URL,
@@ -267,7 +267,7 @@ func TestGitHubConcurrentResolves(t *testing.T) {
 	for i := range workers {
 		go func(i int) {
 			<-start
-			// Mix hits and misses so both cache paths run concurrently.
+			// Mix hits and misses so both cache paths run together.
 			tok := "ghp_valid"
 			if i%4 == 0 {
 				tok = "ghp_bogus"
