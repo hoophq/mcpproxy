@@ -1,5 +1,5 @@
-// Command mcpsmoke is a scripted MCP client for smoke-testing the gateway:
-// it runs initialize → tools/list → tools/call against a streamable-HTTP
+// Command mcpsmoke is a scripted MCP client for smoke-testing the gateway.
+// It runs initialize → tools/list → tools/call against a streamable-HTTP
 // endpoint and prints each exchange.
 //
 // Usage:

@@ -65,7 +65,7 @@ func TestHTTPPostSSEResponse(t *testing.T) {
 }
 
 // TestHTTPPostNotificationIs202: a notification has no response, so the
-// server must say 202 with no payload rather than send an empty body.
+// server answers 202 with no payload instead of 200 and an empty body.
 func TestHTTPPostNotificationIs202(t *testing.T) {
 	hs := httptest.NewServer(New().HTTPHandler())
 	defer hs.Close()
@@ -81,8 +81,8 @@ func TestHTTPPostNotificationIs202(t *testing.T) {
 	}
 }
 
-// TestHTTPGetStreamsServerInitiated covers the S2C channel other slices need
-// for rug-pull and sampling tests.
+// TestHTTPGetStreamsServerInitiated covers the S2C channel that the
+// rug-pull and sampling tests depend on.
 func TestHTTPGetStreamsServerInitiated(t *testing.T) {
 	s := New()
 	hs := httptest.NewServer(s.HTTPHandler())

@@ -165,7 +165,8 @@ func run(cfgPath string, log *slog.Logger) error {
 		mux.Handle("/callback", authSrv.Routes())
 	} else if cfg.Inbound.Mode == "oidc" {
 		// Serve RFC 9728 protected-resource metadata pointing at the
-		// external issuer so MCP clients can discover how to authenticate.
+		// external issuer, so MCP clients can discover where to
+		// authenticate.
 		mux.Handle("/.well-known/oauth-protected-resource",
 			inbound.WellKnownHandler("http://"+cfg.Listen, cfg.Inbound.Issuer))
 	}
@@ -194,8 +195,8 @@ func run(cfgPath string, log *slog.Logger) error {
 	}
 }
 
-// buildResolver wires inbound auth: the embedded auth server's own tokens
-// when enabled, else the configured inbound mode.
+// buildResolver wires inbound auth. An embedded auth server validates its
+// own tokens; otherwise the configured inbound mode decides.
 func buildResolver(cfg *config.Config, authSrv *authserver.Server) (gateway.IdentityResolver, error) {
 	if authSrv != nil {
 		return func(r *http.Request) (inspect.Identity, error) {
@@ -210,8 +211,8 @@ func buildResolver(cfg *config.Config, authSrv *authserver.Server) (gateway.Iden
 	if err != nil {
 		return nil, err
 	}
-	// Wrap: stash the raw bearer + upstream passthrough header in context
-	// for outbound passthrough/exchange sources.
+	// Stash the raw bearer and the upstream passthrough header in the
+	// context for outbound passthrough and exchange sources.
 	return func(r *http.Request) (inspect.Identity, error) {
 		id, err := res(r)
 		if err != nil {

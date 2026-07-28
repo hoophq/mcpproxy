@@ -165,7 +165,7 @@ func TestUnknownMethodAndClientResponse(t *testing.T) {
 	if resp.Error.Code != jsonrpc.CodeMethodNotFound {
 		t.Errorf("code = %d, want %d", resp.Error.Code, jsonrpc.CodeMethodNotFound)
 	}
-	// A client answering a server-initiated request must not be answered.
+	// The server must stay quiet when a client answers one of its requests.
 	if got := handle(t, s, `{"jsonrpc":"2.0","id":"srv-1","result":{}}`); got != nil {
 		t.Errorf("client response drew a reply: %+v", got)
 	}

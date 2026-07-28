@@ -6,9 +6,9 @@
 //	go srv.ServeStdio(clientOut, clientIn)      // newline-delimited stdio
 //
 // It implements initialize, notifications/initialized, tools/list and
-// tools/call over three built-in tools (echo, slow, big), and can be driven
-// from the test to emit server-initiated traffic: SetTools + NotifyToolsChanged
-// for rug-pull scenarios, RequestSampling for a server→client request.
+// tools/call over three built-in tools (echo, slow, big). Your test drives
+// server-initiated traffic with SetTools plus NotifyToolsChanged for
+// rug-pull scenarios, or RequestSampling for a server→client request.
 package testmcp
 
 import (
@@ -31,9 +31,9 @@ import (
 // ProtocolVersion is the version this server reports from initialize.
 const ProtocolVersion = "2025-06-18"
 
-// Built-in tool names. Every one of them is present in the default catalog.
+// Built-in tool names. The default catalog carries all three.
 const (
-	// ToolEcho returns its arguments back as JSON text content.
+	// ToolEcho returns its arguments as JSON text content.
 	ToolEcho = "echo"
 	// ToolSlow sleeps for arguments.ms milliseconds (default 50) before
 	// answering. Use it to exercise timeouts and cancellation.
@@ -46,7 +46,7 @@ const (
 // Server is a scriptable MCP server. The zero value is not usable; call New.
 // All exported methods are safe for concurrent use.
 type Server struct {
-	// Name is reported as serverInfo.name.
+	// Name goes out as serverInfo.name.
 	Name string
 
 	mu          sync.Mutex
@@ -54,10 +54,10 @@ type Server struct {
 	initialized bool
 	nextID      int
 	sse         bool   // POST responses framed as text/event-stream
-	session     string // lazily assigned Mcp-Session-Id
+	session     string // Mcp-Session-Id, assigned on the first exchange
 
 	// out fans server-initiated messages to whichever transport is live.
-	// Buffered so tests can queue notifications before a client attaches.
+	// The buffer lets a test queue notifications before a client attaches.
 	out chan []byte
 }
 
@@ -70,8 +70,8 @@ func New() *Server {
 	}
 }
 
-// DefaultTools is the built-in catalog, returned as a fresh slice so callers
-// can amend it before handing it to SetTools.
+// DefaultTools returns the built-in catalog as a fresh slice, so callers can
+// amend it before handing it to SetTools.
 func DefaultTools() []mcp.Tool {
 	return []mcp.Tool{
 		{
@@ -93,8 +93,8 @@ func DefaultTools() []mcp.Tool {
 }
 
 // SetTools replaces the advertised catalog. It does not notify clients; call
-// NotifyToolsChanged for that. Swapping a tool's description between two
-// tools/list calls is how rug-pull detection is exercised.
+// NotifyToolsChanged for that. Swap a tool's description between two
+// tools/list calls to exercise rug-pull detection.
 func (s *Server) SetTools(tools []mcp.Tool) {
 	cp := make([]mcp.Tool, len(tools))
 	copy(cp, tools)
@@ -131,8 +131,8 @@ func (s *Server) Notify(method string, params any) {
 
 // RequestSampling emits a server-initiated sampling/createMessage request
 // carrying prompt as the sole user message, and returns the request id so the
-// test can match the client's response. Nothing correlates the reply: the
-// point is to exercise the gateway's S2C request path.
+// test can match the client's response. The server drops the reply; use this
+// to exercise the gateway's S2C request path.
 func (s *Server) RequestSampling(prompt string) jsonrpc.ID {
 	s.mu.Lock()
 	s.nextID++
@@ -153,8 +153,8 @@ func (s *Server) RequestSampling(prompt string) jsonrpc.ID {
 	return id
 }
 
-// emit queues a server-initiated message, dropping it if no transport is
-// draining and the queue is full. Tests that care assert on what arrives.
+// emit queues a server-initiated message and drops it when the queue is full
+// with no transport draining. Assert on what arrives if delivery matters.
 func (s *Server) emit(m *jsonrpc.Message) {
 	b, err := m.Marshal()
 	if err != nil {
@@ -167,7 +167,7 @@ func (s *Server) emit(m *jsonrpc.Message) {
 }
 
 // Handle processes one client message and returns the response, or nil for a
-// notification. It is the shared core of both transports.
+// notification. Both transports call it.
 func (s *Server) Handle(ctx context.Context, raw []byte) []byte {
 	env, err := jsonrpc.Parse(raw)
 	if err != nil {
@@ -264,8 +264,9 @@ func (s *Server) callTool(ctx context.Context, env *jsonrpc.Message) *jsonrpc.Me
 		text = strings.Repeat("x", kb*1024)
 
 	default:
-		// MCP reports unknown tools as a tool error, not a protocol
-		// error, so callers see it in the result payload.
+		// MCP spells an unknown tool as a tool error in the result
+		// payload, so the caller reads isError instead of a
+		// JSON-RPC error frame.
 		res, _ := jsonrpc.NewResult(env.ID, map[string]any{
 			"content": []mcp.ContentItem{{Type: "text", Text: "unknown tool " + p.Name}},
 			"isError": true,
@@ -283,8 +284,8 @@ func (s *Server) callTool(ctx context.Context, env *jsonrpc.Message) *jsonrpc.Me
 
 // ServeStdio reads newline-delimited JSON-RPC from in and writes responses
 // (plus any server-initiated messages) to out. It returns when in reaches EOF
-// or ctx is cancelled, making it usable both in-process over io.Pipe and as
-// the body of a real stdio binary's main.
+// or the caller cancels ctx. The same loop backs an in-process io.Pipe and a
+// real stdio binary's main.
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -342,17 +343,17 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 
 // HTTPHandler serves the streamable-HTTP transport: POST carries one client
 // message, GET opens the SSE stream of server-initiated traffic, DELETE ends
-// the session. Responses to POSTs are plain application/json unless the
-// request opts into SSE via SSEResponses.
+// the session. It answers POSTs with application/json until SSEResponses
+// switches the framing.
 func (s *Server) HTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.serve)
 	return mux
 }
 
-// SSEResponses makes POST responses come back as a text/event-stream framing
-// one event, instead of application/json. Both shapes are legal
-// streamable-HTTP; clients must handle each.
+// SSEResponses frames POST responses as a text/event-stream carrying one
+// event, instead of application/json. Streamable-HTTP permits both shapes,
+// so a client has to handle each.
 func (s *Server) SSEResponses(on bool) {
 	s.mu.Lock()
 	s.sse = on

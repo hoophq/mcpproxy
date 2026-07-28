@@ -1,6 +1,6 @@
 // Command testmcp runs the testmcp server as a real stdio MCP binary, so
 // tests can exercise the full spawn path (`go run ./internal/testmcp/cmd`)
-// instead of only in-process pipes.
+// rather than in-process pipes alone.
 package main
 
 import (
@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	// A line on stderr proves the backend's stderr pump is wired up.
+	// This line proves the backend's stderr pump is wired up.
 	fmt.Fprintln(os.Stderr, "testmcp: ready")
 	if err := testmcp.New().ServeStdio(context.Background(), os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "testmcp:", err)
