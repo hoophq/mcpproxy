@@ -19,7 +19,7 @@ type S2CGate struct {
 }
 
 // NewS2CGate builds the server-request gate. A nil Block* pointer means
-// "unset", which resolves to blocked — the safe default documented on
+// "unset", which resolves to blocked, the safe default documented on
 // config.Policy.
 func NewS2CGate(pol config.Policy) *S2CGate {
 	return &S2CGate{

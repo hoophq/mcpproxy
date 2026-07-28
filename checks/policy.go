@@ -40,7 +40,7 @@ func (p *Policy) Inspect(_ context.Context, s inspect.Session, m *inspect.Msg) i
 	// call the operator denied.
 	tool := RealToolName(s, exposed)
 
-	// Deny wins over allow, unconditionally.
+	// Deny wins over allow.
 	if MatchAny(p.denied, tool) {
 		return inspect.Denyf(m.Env, jsonrpc.CodePolicyDenied, NamePolicy,
 			fmt.Sprintf("tool %q is denied by policy", exposed))
@@ -51,9 +51,9 @@ func (p *Policy) Inspect(_ context.Context, s inspect.Session, m *inspect.Msg) i
 	}
 	// A tool absent from the advertised catalog is either a client guess or
 	// a shadowed name. The catalog holds real (pre-override) names, so the
-	// un-aliased name is the one to look up. Only enforceable once a
-	// tools/list has completed — before that the catalog is legitimately
-	// empty and every call would fail.
+	// un-aliased name is the one to look up. This is enforceable only once a
+	// tools/list has completed. Before that the catalog is empty by design
+	// and every call would fail.
 	if catalogListed(s) && !toolAdvertised(s, m.Backend, tool) {
 		return inspect.Denyf(m.Env, jsonrpc.CodePolicyDenied, NamePolicy,
 			fmt.Sprintf("tool %q was not advertised by the server", exposed))
@@ -62,9 +62,9 @@ func (p *Policy) Inspect(_ context.Context, s inspect.Session, m *inspect.Msg) i
 }
 
 // filterCatalog removes denied and non-allowlisted tools from a tools/list
-// response before the client ever sees them: a tool the model cannot see is
-// a tool it can never call. Runs on the real (pre-override) names — the
-// overrides check renames later in the chain.
+// response before the client sees them: a tool the model cannot see is a
+// tool it can never call. It runs on the real (pre-override) names, since
+// the overrides check renames later in the chain.
 func (p *Policy) filterCatalog(_ inspect.Session, m *inspect.Msg) {
 	if len(p.allowed) == 0 && len(p.denied) == 0 {
 		return

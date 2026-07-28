@@ -3,7 +3,7 @@ package checks
 // Match reports whether name matches pattern. The only metacharacter is "*",
 // which matches any run of characters including the empty run; every other
 // byte must match literally. Matching is case-sensitive because MCP tool
-// names are case-sensitive identifiers — a case-insensitive matcher would let
+// names are case-sensitive identifiers. A case-insensitive matcher would let
 // "Read_File" slip past a "read_file" deny rule.
 func Match(pattern, name string) bool {
 	// Two-pointer scan with backtracking to the most recent '*'. Linear in

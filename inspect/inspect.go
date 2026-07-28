@@ -41,8 +41,8 @@ const (
 	Kill
 )
 
-// Msg is the unit flowing through the pipeline. Checks may mutate Payload
-// (re-marshaled envelope) via SetMessage.
+// Msg is the unit flowing through the pipeline. A check may mutate Env in
+// place; the gateway re-marshals it after the chain runs.
 type Msg struct {
 	Dir     Direction
 	Backend string // backend name (aggregation); "" for single-backend
@@ -57,7 +57,7 @@ type Msg struct {
 // Decision is the pipeline outcome for one message.
 type Decision struct {
 	Verdict Verdict
-	// Reply is set on Deny: the synthesized error response to send back
+	// Reply carries the synthesized error response on Deny, headed back
 	// toward the requester.
 	Reply *jsonrpc.Message
 	// Reason is a human-readable explanation (audit + error message).
@@ -76,8 +76,8 @@ type Check interface {
 	Inspect(ctx context.Context, s Session, m *Msg) Decision
 }
 
-// Identity is the authenticated caller, resolved by inbound auth (or
-// injected by an embedding host like hoop).
+// Identity is the authenticated caller. Inbound auth resolves it, or an
+// embedding host like hoop injects it.
 type Identity struct {
 	Subject string
 	Email   string
@@ -94,8 +94,8 @@ type Session interface {
 	// Counter returns a named monotonic counter scoped to the session.
 	Counter(name string) *int64
 	// Meta returns arbitrary per-session state for a check, creating it
-	// with mk on first use. Single-goroutine access per session is
-	// guaranteed by the gateway's per-session serialization.
+	// with mk on first use. The gateway serializes work per session, so
+	// one goroutine at a time reaches this.
 	Meta(key string, mk func() any) any
 }
 

@@ -3,10 +3,10 @@
 // detection, catalog overrides, budgets, guardrail hooks, redaction, and the
 // terminal audit tap.
 //
-// Each check is independent and stateless apart from what it stores on the
-// session (via inspect.Session.Meta / Counter), so a check can be dropped or
-// reordered without touching its neighbours. Assemble fixes the one order
-// that matters for security.
+// A check keeps no state beyond what it stores on the session (via
+// inspect.Session.Meta / Counter), so you can drop or reorder one without
+// touching its neighbours. Assemble fixes the one order that matters for
+// security.
 package checks
 
 import (
@@ -44,20 +44,21 @@ const (
 
 // Assemble builds the canonical pipeline. The order is load-bearing:
 //
-//	budget      — cheapest refusal first; an exhausted budget must not spend
-//	              policy evaluation or an approval round-trip.
-//	policy      — allow/deny lists and "tool was never advertised".
-//	approval    — only reached by calls policy already permitted.
-//	s2c gate    — server-initiated sampling/elicitation.
-//	rug pull    — fingerprints the catalog *before* overrides rewrite it, so
-//	              detection sees what the server actually sent.
-//	overrides   — renames/redescribes the catalog and un-renames calls.
-//	guardrails  — inspects the post-override text the backend will receive.
-//	redaction   — masks result text on the way back.
-//	audit tap   — terminal, always allows; records what survived.
+//  1. budget: cheapest refusal first, so an exhausted budget spends no
+//     policy evaluation and no approval round-trip.
+//  2. policy: allow/deny lists and "tool was never advertised".
+//  3. approval: reached only by calls policy already permitted.
+//  4. s2c gate: server-initiated sampling and elicitation.
+//  5. rug pull: fingerprints the catalog *before* overrides rewrite it, so
+//     detection sees what the server sent.
+//  6. overrides: renames or redescribes the catalog, and un-renames calls.
+//  7. guardrails: inspects the post-override text the backend will receive.
+//  8. redaction: masks result text on the way back.
+//  9. audit tap: terminal, always allows, records what survived.
 //
-// Guardrails and redaction are omitted when their hook is nil: a check that
-// can never fire is pipeline overhead on every message.
+// Assemble omits guardrails and redaction when their hook is nil. A check
+// with no hook cannot fire, and it would still cost a pass over every
+// message.
 func Assemble(pol config.Policy, hooks inspect.Hooks, sink audit.Sink, heldEnabled bool) []inspect.Check {
 	out := make([]inspect.Check, 0, 9)
 	out = append(out,
@@ -77,10 +78,10 @@ func Assemble(pol config.Policy, hooks inspect.Hooks, sink audit.Sink, heldEnabl
 	return append(out, NewAuditTap(sink))
 }
 
-// catalog is the slice of session.State the rug-pull check needs. It is not
-// part of inspect.Session (which stays free of MCP types), so the check
-// asserts for it and degrades to a no-op if the host supplies its own
-// session implementation.
+// catalog is the slice of session.State the rug-pull check needs.
+// inspect.Session omits it to stay free of MCP types, so the check asserts
+// for it and degrades to a no-op when the host supplies its own session
+// implementation.
 type catalog interface {
 	ObserveTool(backend string, t mcp.Tool) (prev string, known bool)
 	InvalidateTools(backend string)
@@ -110,9 +111,9 @@ func isToolCall(m *inspect.Msg) (string, bool) {
 	return inspect.RawTool(m.Env.Params), true
 }
 
-// toolsListResult decodes a successful tools/list response. The raw tool
-// entries are returned untouched so callers can rewrite individual fields
-// without dropping properties the gateway does not model.
+// toolsListResult decodes a successful tools/list response. It hands back the
+// raw tool entries untouched so callers can rewrite individual fields without
+// dropping properties the gateway does not model.
 func toolsListResult(m *inspect.Msg) (*mcp.ToolsListResult, bool) {
 	if m == nil || m.Env == nil || m.Dir != inspect.S2C {
 		return nil, false
@@ -145,8 +146,8 @@ func metaStrings(s inspect.Session, key string) map[string]string {
 
 // RealToolName maps a client-visible tool name back to the name the backend
 // knows, undoing an override rename. Checks that run before the overrides
-// stage must call this so policy, approvals, and budgets are evaluated
-// against the real tool — otherwise an alias would launder a denied call.
+// stage must call this so policy, approvals, and budgets evaluate the real
+// tool. Otherwise an alias would launder a denied call.
 func RealToolName(s inspect.Session, exposed string) string {
 	if real, ok := metaStrings(s, metaKeyRenames)[exposed]; ok {
 		return real
@@ -167,11 +168,10 @@ func rememberRename(s inspect.Session, exposed, real string) {
 	}
 }
 
-// markCatalogListed records that a tools/list completed cleanly. Only the
-// rug-pull check calls it: that stage is the one populating the catalog via
+// markCatalogListed records that a tools/list completed without a rug pull.
+// Only the rug-pull check calls it: that stage populates the catalog via
 // ObserveTool, so flag and contents flip together. Splitting the two across
-// checks would let the policy check refuse tools against a catalog nobody
-// filled.
+// checks would let the policy check refuse tools against an empty catalog.
 func markCatalogListed(s inspect.Session) {
 	*s.Meta(metaKeyListed, func() any { return new(bool) }).(*bool) = true
 }
@@ -181,7 +181,7 @@ func catalogListed(s inspect.Session) bool {
 }
 
 // toolAdvertised reports whether name appeared in a tools/list the client
-// actually received.
+// received.
 //
 // The gateway records the merged catalog under the empty backend name (the
 // fan-out has no single origin) while a tools/call is inspected with its

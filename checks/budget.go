@@ -19,16 +19,16 @@ import (
 const CounterToolCalls = "tool_calls"
 
 // truncationMarker is appended to the last surviving text leaf so the model
-// knows the result is incomplete rather than silently short.
+// can tell an incomplete result from a short one.
 const truncationMarker = "\n[truncated by gateway]"
 
 // rateWindow is the sliding-window period for per-tool rate limits.
 const rateWindow = time.Minute
 
 // Budget caps what one session may spend: total tool calls, per-tool call
-// rate, and the size of results flowing back. Result size is a context-window
-// defence — an unbounded tool result is the cheapest way for a server to
-// flood the model's context.
+// rate, and the size of results flowing back. Capping result size defends
+// the context window. An unbounded tool result is the cheapest way for a
+// server to flood the model's context.
 type Budget struct {
 	maxCalls   int
 	maxResult  int            // bytes; 0 = unlimited
@@ -134,9 +134,9 @@ func isToolResult(m *inspect.Msg) bool {
 }
 
 // truncate shortens the text leaves of a tool result to fit maxResult,
-// rewriting m.Env.Result in place. Non-text content (images, resource links)
-// is left alone: cutting its base64 payload would corrupt it rather than
-// shorten it.
+// rewriting m.Env.Result in place. It leaves non-text content (images,
+// resource links) alone: cutting a base64 payload corrupts it instead of
+// shortening it.
 func (b *Budget) truncate(ctx context.Context, s inspect.Session, m *inspect.Msg) {
 	var result map[string]json.RawMessage
 	if err := json.Unmarshal(m.Env.Result, &result); err != nil {

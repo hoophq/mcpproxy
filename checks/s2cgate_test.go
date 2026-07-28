@@ -43,7 +43,7 @@ func TestS2CGate(t *testing.T) {
 }
 
 // The backend is the party left waiting, so the refusal must answer the
-// server request's own id — not any client id.
+// server request's own id, not any client id.
 func TestS2CGateRepliesToServerRequestID(t *testing.T) {
 	m := serverReq(mcp.MethodSamplingCreateMessage, `"srv-99"`)
 	got := NewS2CGate(config.Policy{}).Inspect(context.Background(), newSession(t), m)

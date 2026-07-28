@@ -15,7 +15,7 @@ import (
 type Approval struct {
 	tools []string
 	// held reports whether an approval store is wired. Without one a Hold
-	// would strand the call forever, so the check refuses instead — failing
+	// would strand the call forever, so the check refuses instead. Failing
 	// closed is the only safe reading of "this tool needs approval".
 	held bool
 }

@@ -16,9 +16,9 @@ import (
 //
 //   - tool-call arguments, which carry whatever the model was talked into
 //     sending (secrets, injected instructions);
-//   - tool descriptions, which are prompt input. A poisoned description is
-//     an attack on the model itself, and since the whole catalog is
-//     compromised the session ends rather than the single message.
+//   - tool descriptions, which are prompt input. A poisoned description
+//     attacks the model itself, and it compromises the whole catalog, so
+//     the check ends the session instead of the single message.
 type Guardrails struct {
 	guard func(ctx context.Context, dir inspect.Direction, text string) error
 	sink  audit.Sink

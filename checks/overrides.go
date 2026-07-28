@@ -14,10 +14,10 @@ import (
 // description replaced (descriptions are prompt input, so operators need to
 // own them).
 //
-// The rewrite is presentation-only. Every rename is remembered on the session
-// so calls arriving under the exposed name are rewritten back to the real
-// name before they reach the backend, and so the checks that ran earlier
-// evaluate the real name via RealToolName.
+// The rewrite is presentation-only. The check records every rename on the
+// session, so it can rewrite calls arriving under the exposed name back to
+// the real name before they reach the backend, and so the checks that ran
+// earlier evaluate the real name via RealToolName.
 type Overrides struct {
 	byTool map[string]config.ToolOverride
 }

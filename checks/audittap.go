@@ -11,14 +11,14 @@ import (
 	"github.com/hoophq/mcpproxy/mcp"
 )
 
-// AuditTap is the terminal check: it records what actually survived the
-// pipeline and always allows. Sitting last means the audit trail reflects
-// post-override, post-redaction reality rather than what the client sent.
+// AuditTap is the terminal check. It records what survived the pipeline and
+// always allows. Sitting last means the audit trail reflects post-override,
+// post-redaction reality instead of what the client sent.
 //
 // Tool arguments are recorded as a SHA-256 digest plus a byte count, never
-// verbatim — arguments routinely carry credentials and customer data, and an
-// audit log is a lower-trust store than the session it describes. The digest
-// still proves two calls were identical and lets a reviewer match a recorded
+// verbatim. Arguments carry credentials and customer data, and an audit log
+// is a lower-trust store than the session it describes. The digest still
+// proves two calls were identical and lets a reviewer match a recorded
 // payload against the log.
 type AuditTap struct {
 	sink audit.Sink
@@ -42,8 +42,8 @@ func (a *AuditTap) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 	if res, ok := toolsListResult(m); ok {
 		a.toolsListed(ctx, s, m, res)
 	}
-	// initialize is audited by the gateway itself (it owns the fan-out and
-	// the merged server info); duplicating it here would double-count.
+	// The gateway audits initialize itself, since it owns the fan-out and
+	// the merged server info. Duplicating it here would double-count.
 	return inspect.AllowAll
 }
 

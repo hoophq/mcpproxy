@@ -120,7 +120,7 @@ func compactJSON(raw json.RawMessage) []byte {
 }
 
 // ObserveTool records a tool from a tools/list response. It returns the
-// previous fingerprint and whether the tool was seen before — a changed
+// previous fingerprint and whether the tool was seen before. A changed
 // fingerprint on a known tool is a rug pull.
 func (s *State) ObserveTool(backend string, t mcp.Tool) (prev string, known bool) {
 	fp := Fingerprint(t)
@@ -138,12 +138,13 @@ func (s *State) ObserveTool(backend string, t mcp.Tool) (prev string, known bool
 
 // InvalidateTools clears the catalog for a backend (on
 // notifications/tools/list_changed) so the next tools/list re-fingerprints.
-// Fingerprints are retained under a shadow key so rug-pull detection still
-// compares against the pre-change catalog.
+// It keeps the existing fingerprints so rug-pull detection still compares
+// against the pre-change catalog.
 func (s *State) InvalidateTools(backend string) {
 	// Retain: comparison happens in ObserveTool against existing entries.
-	// Nothing to clear — ToolKnown must keep answering true for tools the
-	// client already saw, and fingerprints must persist for comparison.
+	// There is nothing to clear. ToolKnown must keep answering true for
+	// tools the client already saw, and fingerprints must persist for
+	// comparison.
 	_ = backend
 }
 

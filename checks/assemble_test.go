@@ -73,7 +73,7 @@ func TestAssembleBudgetDeniesBeforePolicy(t *testing.T) {
 		t.Fatalf("first call denied by %s: %s", by, d.Reason)
 	}
 	// The next call is denied for budget even though policy would also
-	// reject it — the cheaper refusal wins.
+	// reject it. The cheaper refusal wins.
 	d, by := run(t, pipeline, s, callMsg(t, "be", "blocked_tool", nil))
 	if d.Verdict != inspect.Deny {
 		t.Fatalf("verdict = %s, want Deny", verdictString(d.Verdict))

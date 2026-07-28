@@ -11,8 +11,8 @@ import (
 )
 
 // ID is a JSON-RPC id: string, integer, or null. The zero value means
-// "absent" (notification). Raw preserves the exact wire bytes so responses
-// are correlated and re-emitted byte-identically.
+// "absent" (notification). Raw preserves the exact wire bytes so the gateway
+// can correlate responses and re-emit the id byte for byte.
 type ID struct {
 	Raw json.RawMessage
 }
@@ -47,7 +47,7 @@ func (id *ID) UnmarshalJSON(b []byte) error {
 
 // Message is a single JSON-RPC 2.0 message. Exactly one of Method (request /
 // notification) or Result/Error (response) is set. Extra carries any fields
-// beyond the standard five so nothing is lost on re-serialization.
+// beyond the standard five so re-serialization drops nothing.
 type Message struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      ID              `json:"id,omitempty"`

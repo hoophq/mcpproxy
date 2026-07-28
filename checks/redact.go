@@ -9,11 +9,11 @@ import (
 	"github.com/hoophq/mcpproxy/mcp"
 )
 
-// Redactor masks sensitive strings in data flowing back to the model. Only
-// the two payloads that carry backend-controlled bulk text are walked:
-// tool results (result.content[]) and resource reads (result.contents[]).
-// Everything else — schemas, capability blobs, ids — is structural and
-// rewriting it would break the protocol.
+// Redactor masks sensitive strings in data flowing back to the model. It
+// walks only the two payloads that carry backend-controlled bulk text: tool
+// results (result.content[]) and resource reads (result.contents[]). Schemas,
+// capability blobs, and ids are structural, and rewriting them would break
+// the protocol.
 type Redactor struct {
 	redact func(ctx context.Context, text string) (string, int, error)
 	sink   audit.Sink
@@ -103,9 +103,9 @@ func (r *Redactor) redactItem(ctx context.Context, raw json.RawMessage) (json.Ra
 	}
 	masked, n, err := r.redact(ctx, text)
 	if err != nil || n == 0 {
-		// A failing redactor must not silently pass unmasked text off as
-		// clean, but neither can it fabricate content: leave the entry as-is
-		// and let the audit count stay honest at zero.
+		// A failing redactor must not pass unmasked text off as clean, and
+		// it cannot fabricate content either. Leave the entry as-is and
+		// report zero redactions.
 		return raw, 0
 	}
 	mb, err := json.Marshal(masked)

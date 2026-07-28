@@ -18,11 +18,11 @@ const (
 	OnRugPullAlert = "alert"
 )
 
-// RugPull detects a server silently mutating a tool the client already
-// approved of. An MCP server can re-answer tools/list at any time; if the
-// description or input schema of an already-seen tool changes mid-session,
-// the client's model is now reasoning about a tool it never saw. That is the
-// rug pull, and the default response is to kill the session.
+// RugPull detects a server mutating a tool the client already approved of.
+// An MCP server can re-answer tools/list at any time. A description or input
+// schema that changes on an already-seen tool leaves the client's model
+// reasoning about a tool it never saw. The default response to that is
+// killing the session.
 type RugPull struct {
 	onChange string
 	sink     audit.Sink
@@ -82,14 +82,14 @@ func (r *RugPull) Inspect(ctx context.Context, s inspect.Session, m *inspect.Msg
 		})
 		return inspect.Decision{Verdict: inspect.Kill, Rule: NameRugPull, Reason: reason}
 	}
-	// Only after a clean pass is the catalog authoritative enough for the
-	// policy check to refuse unadvertised tools.
+	// A clean pass makes the catalog authoritative, which is what lets the
+	// policy check refuse unadvertised tools.
 	markCatalogListed(s)
 	return inspect.AllowAll
 }
 
-// listChanged handles notifications/tools/list_changed. The catalog is
-// invalidated so the next tools/list re-fingerprints, but retained
+// listChanged handles notifications/tools/list_changed. It invalidates the
+// catalog so the next tools/list re-fingerprints, while retained
 // fingerprints still feed rug-pull comparison: a server cannot escape
 // detection by announcing the change first.
 func (r *RugPull) listChanged(ctx context.Context, s inspect.Session, m *inspect.Msg) inspect.Decision {
