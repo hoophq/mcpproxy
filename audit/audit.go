@@ -1,6 +1,6 @@
 // Package audit defines the structured event stream the gateway emits: one
-// event per protocol-level occurrence, consumed by loggers, the WAL, and
-// (later) hoop's session review.
+// event per protocol-level occurrence. Loggers and the WAL consume it today,
+// and hoop's session review will consume it later.
 package audit
 
 import (
@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// EventType enumerates the audit vocabulary. Stable strings: they are the
-// query language for review tooling.
+// EventType enumerates the audit vocabulary. The strings are stable, since
+// review tooling queries against them.
 type EventType string
 
 const (

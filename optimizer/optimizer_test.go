@@ -150,7 +150,7 @@ func TestPreservesCatalogOrder(t *testing.T) {
 	}
 }
 
-// Filtering must not corrupt the envelope: sibling result fields survive and
+// Filtering must leave the envelope intact: sibling result fields survive and
 // the message still marshals to parseable JSON-RPC.
 func TestEnvelopeStaysValid(t *testing.T) {
 	o := New(config.Optimizer{TopK: 2, Purpose: "github issues"}, nil, nil)
@@ -182,8 +182,8 @@ func TestEnvelopeStaysValid(t *testing.T) {
 	if res.NextCursor != "next-page" {
 		t.Errorf("nextCursor = %q, want next-page (sibling fields must survive)", res.NextCursor)
 	}
-	// Surviving entries must be byte-identical to what the server sent:
-	// unknown fields on a tool are not ours to drop.
+	// Surviving entries must be byte-identical to what the server sent.
+	// Unknown fields on a tool are not ours to drop.
 	var tool struct {
 		Name        string          `json:"name"`
 		InputSchema json.RawMessage `json:"inputSchema"`
@@ -252,7 +252,7 @@ func TestPassThrough(t *testing.T) {
 	}
 }
 
-// A payload we cannot parse must pass through untouched rather than be
+// A payload we cannot parse must pass through untouched rather than get
 // replaced by something we guessed at.
 func TestMalformedResultPassesThrough(t *testing.T) {
 	o := New(config.Optimizer{TopK: 1, Purpose: "github issues"}, nil, nil)
@@ -319,16 +319,16 @@ func TestAuditEvent(t *testing.T) {
 		t.Errorf("dropped list %v missing get_weather", dropped)
 	}
 
-	// The event must survive JSON encoding: it goes to the WAL as JSONL.
+	// The event must survive JSON encoding: the WAL stores it as JSONL.
 	if _, err := json.Marshal(ev); err != nil {
 		t.Errorf("audit event is not JSON-encodable: %v", err)
 	}
 }
 
-// A custom Scorer must fully control ranking; that is the seam an embedding
-// provider plugs into.
+// A custom Scorer must control ranking on its own. That seam is where an
+// embedding provider plugs in.
 func TestCustomScorer(t *testing.T) {
-	// Reverse the lexical intuition: rank weather above everything.
+	// Invert the lexical intuition and rank weather above everything.
 	o := New(config.Optimizer{TopK: 2, Purpose: "github issues"}, nil,
 		scorerFunc(func(_, name, _ string) float64 {
 			if strings.Contains(name, "weather") {
@@ -343,7 +343,7 @@ func TestCustomScorer(t *testing.T) {
 	names := toolNames(t, m)
 	want := []string{"get_weather", "weather_forecast"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
-		t.Errorf("kept %v, want %v — custom scorer was not consulted", names, want)
+		t.Errorf("kept %v, want %v: custom scorer was not consulted", names, want)
 	}
 }
 
@@ -461,7 +461,7 @@ func TestEnabled(t *testing.T) {
 	}
 }
 
-// A nil sink must be tolerated: the optimizer is useful without auditing.
+// A nil sink must work: the optimizer is useful without auditing.
 func TestNilSinkAndScorer(t *testing.T) {
 	o := New(config.Optimizer{TopK: 2, Purpose: "github issues"}, nil, nil)
 	m := listMsg(t, catalog)

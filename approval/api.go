@@ -28,14 +28,13 @@ type API struct {
 
 // NewAPI wraps store in an http.Handler guarded by a bearer token.
 //
-// An empty token disables the guard entirely: the daemon owns that policy
-// decision (it may be fronting the API with its own auth, or binding it to
-// loopback). Comparison is constant-time so the endpoint cannot be used as a
-// token oracle.
+// An empty token disables the guard: the daemon owns that policy decision, and
+// may front the API with its own auth or bind it to loopback. Comparison is
+// constant-time, so the endpoint cannot serve as a token oracle.
 func NewAPI(store *Store, token string) *API {
 	a := &API{store: store, token: token, log: slog.Default(), mux: http.NewServeMux()}
-	// Go 1.22+ pattern routing: method and wildcards are matched for us, so a
-	// bad method yields 405 with Allow rather than a hand-rolled 404.
+	// Go 1.22+ pattern routing matches method and wildcards, so a bad method
+	// yields 405 with Allow instead of a hand-rolled 404.
 	a.mux.HandleFunc("GET /{$}", a.handleList)
 	a.mux.HandleFunc("GET /{id}", a.handleGet)
 	a.mux.HandleFunc("POST /{id}/approve", a.handleResolve(true))
@@ -115,8 +114,8 @@ func (a *API) handleResolve(approve bool) http.HandlerFunc {
 func (a *API) writeJSON(w http.ResponseWriter, r *http.Request, code int, v any) {
 	body, err := json.Marshal(v)
 	if err != nil {
-		// Encoding our own projection cannot normally fail; if it does, say so
-		// before any bytes are committed rather than truncating the response.
+		// Encoding our own projection should not fail. If it does, report it
+		// before committing any bytes rather than truncating the response.
 		a.log.ErrorContext(r.Context(), "approval encode failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "encode failed")
 		return

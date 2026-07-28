@@ -4,9 +4,9 @@
 // gateway never imports this package.
 //
 // Everything here is nil-safe by construction. A zero config yields a
-// Telemetry whose ObserveMessage is a cheap no-op and whose Handler is nil,
-// which lets callers wire telemetry unconditionally and let configuration —
-// not code paths — decide whether anything is recorded.
+// Telemetry whose ObserveMessage costs a nil check and whose Handler is nil,
+// so a caller wires telemetry once and lets configuration decide whether
+// anything gets recorded.
 package telemetry
 
 import (
@@ -31,8 +31,8 @@ import (
 const defaultServiceName = "mcpproxy"
 
 // durationBuckets span sub-millisecond policy decisions through slow remote
-// backends; the pipeline itself should live in the first three buckets while
-// tool calls land in the tail.
+// backends. The pipeline itself lands in the first three buckets; tool calls
+// land in the tail.
 var durationBuckets = []float64{
 	.0005, .001, .0025, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30,
 }
@@ -51,10 +51,10 @@ type Telemetry struct {
 	tracer         trace.Tracer
 }
 
-// New builds telemetry from config. Metrics are enabled by
-// cfg.PrometheusPath, tracing by cfg.OTLPEndpoint; either, both, or neither
-// may be set. The OTLP exporter connects lazily in the background, so New
-// never blocks on an unreachable collector.
+// New builds telemetry from config. cfg.PrometheusPath enables metrics and
+// cfg.OTLPEndpoint enables tracing; either, both, or neither may be set. The
+// OTLP exporter connects in the background, so New never blocks on an
+// unreachable collector.
 func New(cfg config.Telemetry) (*Telemetry, error) {
 	t := &Telemetry{path: cfg.PrometheusPath}
 
@@ -85,9 +85,9 @@ func New(cfg config.Telemetry) (*Telemetry, error) {
 		if service == "" {
 			service = defaultServiceName
 		}
-		// WithDialOption is deliberately omitted: the exporter reconnects on
-		// its own and NewClient does not dial eagerly, so a down collector
-		// costs dropped spans rather than a failed startup.
+		// WithDialOption stays out: the exporter reconnects on its own and
+		// NewClient does not dial eagerly, so a down collector costs dropped
+		// spans instead of a failed startup.
 		exp, err := otlptracegrpc.New(context.Background(),
 			otlptracegrpc.WithEndpoint(cfg.OTLPEndpoint),
 			otlptracegrpc.WithInsecure(),
@@ -99,8 +99,8 @@ func New(cfg config.Telemetry) (*Telemetry, error) {
 			attribute.String("service.name", service),
 		))
 		if err != nil {
-			// Schema conflicts only; fall back to the bare service resource
-			// rather than losing tracing entirely.
+			// Schema conflicts only. Fall back to the bare service resource
+			// instead of dropping tracing.
 			res = resource.NewSchemaless(attribute.String("service.name", service))
 		}
 		t.tracerProvider = sdktrace.NewTracerProvider(
@@ -113,8 +113,8 @@ func New(cfg config.Telemetry) (*Telemetry, error) {
 	return t, nil
 }
 
-// Path is the HTTP path Handler should be mounted at, or "" when metrics are
-// disabled.
+// Path is the HTTP path the caller should mount Handler at, or "" when
+// metrics are disabled.
 func (t *Telemetry) Path() string {
 	if t == nil {
 		return ""
@@ -143,10 +143,10 @@ func (t *Telemetry) Registry() *prometheus.Registry {
 // ObserveMessage implements gateway.Observer: one call per message that
 // completed the inspection pipeline.
 //
-// The tool label is intentionally only on the counter. Tool names come from
-// remote servers and are therefore unbounded-ish cardinality; multiplying
-// them by histogram buckets is the classic way to melt a Prometheus. The
-// histogram keeps direction/backend/method only.
+// The tool label sits on the counter alone. Tool names come from remote
+// servers, so their cardinality is unbounded, and multiplying them by the
+// bucket count would explode the series the registry holds. The histogram
+// keeps direction, backend and method.
 func (t *Telemetry) ObserveMessage(dir inspect.Direction, backendName, method, tool, decision string, dur time.Duration) {
 	if t == nil {
 		return
@@ -158,9 +158,9 @@ func (t *Telemetry) ObserveMessage(dir inspect.Direction, backendName, method, t
 	}
 	if t.tracer != nil {
 		// One span per message, back-dated to the pipeline entry so the span
-		// duration equals the measured latency. v1 keeps spans flat: there is
-		// no ambient request context to parent them to, and a flat span with
-		// good attributes is more useful than a fabricated hierarchy.
+		// duration equals the measured latency. v1 keeps spans flat: no
+		// ambient request context exists to parent them to, and a flat span
+		// with good attributes beats a fabricated hierarchy.
 		end := time.Now()
 		_, span := t.tracer.Start(context.Background(), "mcp."+methodOrMessage(method),
 			trace.WithTimestamp(end.Add(-dur)),

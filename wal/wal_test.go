@@ -24,8 +24,8 @@ func newWAL(t *testing.T) *WAL {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = w.Close() })
-	// Keep warnings out of test output; the logger is exercised explicitly in
-	// TestWriteErrorWarnsOnce.
+	// Keep warnings out of test output. TestWriteErrorWarnsOnce covers the
+	// logger on its own.
 	return w.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
@@ -64,8 +64,8 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-// session_end must durably close the file: the record has to survive even if
-// the process dies immediately afterwards, so nothing may sit in the buffer.
+// session_end must durably close the file. The record has to survive the
+// process dying right afterwards, so nothing may sit in the buffer.
 func TestSessionEndFlushesAndCloses(t *testing.T) {
 	dir := t.TempDir()
 	w, err := New(dir)
@@ -85,7 +85,7 @@ func TestSessionEndFlushesAndCloses(t *testing.T) {
 		t.Errorf("file has %d lines after session_end, want 2 (buffer not flushed)", n)
 	}
 
-	// The handle is released, so late events are dropped rather than
+	// The WAL released the handle, so a late event gets dropped instead of
 	// reopening and corrupting a sealed record.
 	w.Emit(ctx, audit.Event{Type: audit.EventToolCall, Session: "s1", Tool: "late"})
 	got, err := w.Replay("s1")
@@ -151,8 +151,8 @@ func TestSessionsAreIsolated(t *testing.T) {
 	}
 }
 
-// Every line must be independently parseable JSON: that is the whole point
-// of JSONL, and downstream review tooling streams it line by line.
+// Every line must parse as JSON on its own. Downstream review tooling streams
+// the file line by line and never buffers the whole session.
 func TestFileIsValidJSONL(t *testing.T) {
 	dir := t.TempDir()
 	w, err := New(dir)
@@ -188,8 +188,8 @@ func TestConcurrentEmit(t *testing.T) {
 	var wg sync.WaitGroup
 	for s := range sessions {
 		sid := string(rune('a' + s))
-		// Two writers per session so the per-file mutex is actually contended,
-		// plus distinct sessions so the map is contended too.
+		// Two writers per session contend on the per-file mutex, and the
+		// distinct sessions contend on the map.
 		for range 2 {
 			wg.Add(1)
 			go func() {
@@ -282,7 +282,7 @@ func TestRejectsTraversalSessionIDs(t *testing.T) {
 	}
 }
 
-// Events with no session belong to no file and must be dropped silently.
+// Events with no session belong to no file, so Emit drops them without noise.
 func TestEmitWithoutSessionIsDropped(t *testing.T) {
 	w := newWAL(t)
 	w.Emit(context.Background(), audit.Event{Type: audit.EventError, Reason: "boom"})
@@ -295,8 +295,8 @@ func TestEmitWithoutSessionIsDropped(t *testing.T) {
 	}
 }
 
-// Auditing must never take down the gateway: a broken file yields one
-// warning and continued no-op Emits, not an error return or a panic.
+// Auditing must never take down the gateway. A broken file yields one warning
+// and continued no-op Emits rather than an error return or a panic.
 func TestWriteErrorWarnsOnce(t *testing.T) {
 	dir := t.TempDir()
 	w, err := New(dir)
@@ -318,7 +318,7 @@ func TestWriteErrorWarnsOnce(t *testing.T) {
 	_ = sf.f.Close()
 	sf.mu.Unlock()
 
-	// Enough events to overflow the buffer so writes actually reach the fd.
+	// Enough events to overflow the buffer so the writes reach the fd.
 	big := strings.Repeat("x", 4096)
 	for range 40 {
 		w.Emit(ctx, audit.Event{Type: audit.EventToolResult, Session: "broken", Reason: big})

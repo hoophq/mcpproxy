@@ -4,10 +4,9 @@
 //
 // It is an audit.Sink, so it inherits that contract: Emit must be safe for
 // concurrent use and must not block. Writes go through a buffered writer
-// under a per-session mutex; the buffer is flushed and fsync'd exactly once,
-// when the session terminates, because that is the only point where losing
-// the tail actually matters and the only point where an fsync per event
-// would otherwise be paid thousands of times.
+// under a per-session mutex. The WAL flushes and fsyncs that buffer once,
+// when the session terminates, which is the only point where losing the tail
+// costs anything and the only way to avoid an fsync per event.
 package wal
 
 import (
@@ -25,14 +24,14 @@ import (
 	"github.com/hoophq/mcpproxy/audit"
 )
 
-// writeBufSize is generous relative to a typical event (a few hundred bytes)
-// so a busy session syscalls rarely.
+// writeBufSize is large relative to a typical event of a few hundred bytes,
+// so a busy session hits the write syscall rarely.
 const writeBufSize = 32 * 1024
 
-// maxSealed bounds the tombstone set for finished sessions. Tombstones cost
-// one session id each and exist only to stop a late event from resurrecting
-// a sealed record; forgetting the oldest ones after this many sessions is
-// harmless, since events that late are pathological anyway.
+// maxSealed bounds the tombstone set for finished sessions. Each tombstone
+// costs one session id and stops a late event from resurrecting a sealed
+// record. Forgetting the oldest ones after this many sessions is safe:
+// an event arriving that late signals a bug elsewhere.
 const maxSealed = 4096
 
 // WAL is a session-partitioned append-only audit log. The zero value is not
@@ -43,21 +42,21 @@ type WAL struct {
 
 	mu    sync.Mutex
 	files map[string]*sessionFile
-	// sealed marks sessions whose file has been fsync'd and closed, with
+	// sealed marks sessions whose file the WAL has fsync'd and closed, with
 	// sealedFIFO giving eviction order.
 	sealed     map[string]struct{}
 	sealedFIFO []string
 }
 
-// sessionFile owns one <sid>.jsonl. Its own mutex means two sessions never
-// contend with each other, only with themselves.
+// sessionFile owns one <sid>.jsonl. Its own mutex keeps two sessions from
+// contending with each other; a session contends only with itself.
 type sessionFile struct {
 	mu     sync.Mutex
 	f      *os.File
 	w      *bufio.Writer
 	closed bool
 	// warned suppresses repeat log spam: a broken file stays broken, and one
-	// warning per session is the useful signal. Atomic because the marshal
+	// warning per session carries the signal. Atomic because the marshal
 	// failure path reports without holding mu.
 	warned atomic.Bool
 }
@@ -88,10 +87,11 @@ func (w *WAL) WithLogger(l *slog.Logger) *WAL {
 
 // Emit appends ev to its session's file, opening the file on first use. On a
 // terminal event (session_end / session_killed) it flushes, fsyncs, and
-// closes. Events without a session id are dropped: they belong to no file.
+// closes. Emit drops events carrying no session id, since they belong to no
+// file.
 //
-// Emit never panics and never returns an error; failures are logged once per
-// session. Auditing must not be able to take down the gateway.
+// Emit never panics and never returns an error. It logs failures once per
+// session, so auditing cannot take down the gateway.
 func (w *WAL) Emit(_ context.Context, ev audit.Event) {
 	if ev.Session == "" {
 		return
@@ -117,12 +117,12 @@ func (w *WAL) Emit(_ context.Context, ev audit.Event) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	if sf.closed {
-		// Raced with the terminal event on another goroutine; the record is
-		// already fsync'd and must not grow.
+		// Raced with the terminal event on another goroutine. That record
+		// is fsync'd and must not grow.
 		return
 	}
 	// Two writes rather than append(line, '\n'): bufio copies into its own
-	// buffer either way, so the append would only buy a reallocation.
+	// buffer either way, so the append would add one reallocation.
 	if _, err := sf.w.Write(line); err != nil {
 		w.warnOnce(sf, ev.Session, fmt.Errorf("write event: %w", err))
 		return
@@ -163,8 +163,8 @@ func (w *WAL) fileFor(sid string) (*sessionFile, bool, error) {
 	return sf, true, nil
 }
 
-// seal releases the session's handle and tombstones the id so late events
-// are dropped instead of reopening a completed record.
+// seal releases the session's handle and tombstones the id, so a late event
+// gets dropped instead of reopening a completed record.
 func (w *WAL) seal(sid string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -200,8 +200,8 @@ func (sf *sessionFile) closeLocked() error {
 }
 
 // warnOnce logs at most one warning per session file. sf may be nil when the
-// failure happened before a handle existed, in which case every occurrence
-// is logged — those are open/validation failures, not a stuck write loop.
+// failure predates a handle. Those are open and validation failures rather
+// than a stuck write loop, so warnOnce logs every one of them.
 func (w *WAL) warnOnce(sf *sessionFile, sid string, err error) {
 	if sf != nil && !sf.warned.CompareAndSwap(false, true) {
 		return
@@ -209,8 +209,8 @@ func (w *WAL) warnOnce(sf *sessionFile, sid string, err error) {
 	w.log.Warn("wal write failed", "sid", sid, "err", err)
 }
 
-// Close flushes and closes every open session file. It is safe to call while
-// sessions are still live; those sessions simply stop being recorded.
+// Close flushes and closes every open session file. Calling it while sessions
+// are still live is safe; those sessions stop being recorded.
 func (w *WAL) Close() error {
 	w.mu.Lock()
 	files := w.files
@@ -230,7 +230,7 @@ func (w *WAL) Close() error {
 }
 
 // Flush pushes buffered bytes for every open session to the OS without
-// closing. Useful for a live tail of an in-progress session.
+// closing, which lets a caller tail an in-progress session.
 func (w *WAL) Flush() error {
 	w.mu.Lock()
 	files := make([]*sessionFile, 0, len(w.files))
@@ -309,8 +309,8 @@ func (w *WAL) Sessions() ([]string, error) {
 }
 
 // pathFor maps a session id to its file, rejecting ids that would escape the
-// directory. Session ids come off the wire (Mcp-Session-Id header), so this
-// is a real boundary, not a formality.
+// directory. Session ids arrive over the wire in the Mcp-Session-Id header,
+// so this check guards a trust boundary.
 func (w *WAL) pathFor(sid string) (string, error) {
 	if sid == "" || sid == "." || sid == ".." ||
 		strings.ContainsAny(sid, `/\`) || strings.ContainsRune(sid, 0) {

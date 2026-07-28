@@ -16,8 +16,8 @@ const testToken = "s3cret-token"
 // issues authenticated requests against it.
 func serve(t *testing.T, s *Store, token string) (*httptest.Server, func(method, path, bearer string) *http.Response) {
 	t.Helper()
-	// Mounted the way the daemon mounts it, so path handling is exercised for
-	// real rather than at the root.
+	// Mount it the way the daemon does, so the test exercises prefix
+	// stripping instead of serving from the root.
 	mux := http.NewServeMux()
 	mux.Handle("/approvals/", http.StripPrefix("/approvals", NewAPI(s, token)))
 	srv := httptest.NewServer(mux)
@@ -273,8 +273,8 @@ func TestAPIListOrderAndShape(t *testing.T) {
 	}
 
 	resp := do(http.MethodGet, "/", testToken)
-	// Decode loosely to pin the wire contract: field names reviewers script
-	// against, and age as seconds rather than raw nanoseconds.
+	// Decode loosely to pin the wire contract: the field names reviewers
+	// script against, and age in seconds rather than raw nanoseconds.
 	raw := decode[[]map[string]any](t, resp)
 	if len(raw) != 3 {
 		t.Fatalf("GET / = %d entries, want 3", len(raw))

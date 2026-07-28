@@ -17,18 +17,18 @@
 //	                          gateway forwards to the backend, or answers
 //	                          the client with CodeApprovalRejected
 //
-// Nothing resolves twice: whichever of the reviewer, the expiry timer, or the
-// client's own cancellation gets there first wins, the rest see
-// [ErrAlreadyResolved]. A call nobody reviews within the configured timeout is
-// rejected, so a forgotten approval fails closed rather than hanging a session
-// forever.
+// A call resolves once. The reviewer, the expiry timer and the client's own
+// cancellation all race for it; the first one through sets the verdict and the
+// rest get [ErrAlreadyResolved]. The timer rejects any call nobody reviews
+// within the configured timeout, so a forgotten approval fails closed rather
+// than hanging a session forever.
 //
 // # Reviewing
 //
 // [NewAPI] exposes the store over HTTP. The daemon mounts it under
 // /approvals, so a reviewer works with plain curl:
 //
-//	# what is waiting?
+//	# list parked calls
 //	curl -s -H "Authorization: Bearer $MCPPROXY_APPROVAL_TOKEN" \
 //	     http://localhost:8080/approvals/
 //	[{"id":"6f1c...","session":"s-1","user":"alice","backend":"github",
@@ -46,9 +46,9 @@
 // # Audit
 //
 // The store emits [audit.EventApprovalResolved] for every resolution with the
-// reason and the source that caused it ("api", "expiry" or "canceled"). The
-// gateway emits its own pending/resolved pair around the wait; the store's
-// event is the one that explains *why* the answer was what it was.
+// reason and the source behind it ("api", "expiry" or "canceled"). The gateway
+// emits its own pending/resolved pair around the wait; the store's event
+// records which of the three paths decided the call.
 package approval
 
 import (
@@ -85,8 +85,8 @@ const (
 	sourceCanceled = "canceled"
 )
 
-// DefaultTimeout is used when [New] is given a non-positive timeout. It
-// matches config.Approvals' default.
+// DefaultTimeout applies when [New] gets a non-positive timeout. It matches
+// config.Approvals' default.
 const DefaultTimeout = 5 * time.Minute
 
 // entry is one parked call. Its channel is buffered so resolution never blocks
@@ -108,8 +108,8 @@ type entry struct {
 // Store parks held calls in memory and hands out resolution channels. It
 // implements gateway.HeldStore. The zero value is not usable; call [New].
 //
-// State is deliberately in-process: a restart drops pending approvals, which
-// is the safe direction (the waiting clients are gone too).
+// State lives in-process: a restart drops pending approvals, which is the safe
+// direction, since the waiting clients are gone too.
 type Store struct {
 	timeout time.Duration
 	sink    audit.Sink
@@ -122,10 +122,10 @@ type Store struct {
 // compile-time proof the store satisfies the gateway seam.
 var _ gateway.HeldStore = (*Store)(nil)
 
-// New builds a Store. timeout bounds how long a call may wait before it is
-// auto-rejected; <= 0 means [DefaultTimeout]. sink may be nil (events are
+// New builds a Store. timeout bounds how long a call may wait before the timer
+// rejects it; <= 0 means [DefaultTimeout]. sink may be nil (events are
 // discarded). The same duration doubles as the retention window for resolved
-// records, which is what makes a late duplicate resolve a 409 instead of a 404.
+// records, so a late duplicate resolve gets a 409 instead of a 404.
 func New(timeout time.Duration, sink audit.Sink) *Store {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -142,8 +142,8 @@ func New(timeout time.Duration, sink audit.Sink) *Store {
 }
 
 // Hold parks h and returns its id plus a channel that yields exactly one
-// verdict: true if a reviewer approved, false if anybody rejected, the timeout
-// fired, or ctx was canceled.
+// verdict: true if a reviewer approved, false if a reviewer rejected, the
+// timeout fired, or ctx was canceled.
 //
 // The channel is buffered, so the caller may abandon it (the gateway does when
 // its request context dies) without leaking a goroutine here.
@@ -167,11 +167,11 @@ func (s *Store) Hold(ctx context.Context, h gateway.HeldCall) (string, <-chan bo
 	// fire before AfterFunc returns, and finish() reads both fields.
 	s.mu.Lock()
 	s.entries[id] = e
-	// Fail closed: an approval nobody looks at becomes a rejection.
+	// Fail closed: the timer rejects an approval no reviewer answers.
 	e.expiry = time.AfterFunc(s.timeout, func() {
 		_ = s.finish(id, false, "approval timed out", sourceExpiry)
 	})
-	// If the client hangs up we stop holding a slot in the reviewer's queue.
+	// A client that hangs up releases its slot in the reviewer's queue.
 	e.unwatch = context.AfterFunc(ctx, func() {
 		_ = s.finish(id, false, "caller canceled", sourceCanceled)
 	})
@@ -209,21 +209,21 @@ func (s *Store) finish(id string, approve bool, reason, source string) error {
 	expiry, unwatch := e.expiry, e.unwatch
 	s.mu.Unlock()
 
-	// Release the timers outside the lock: neither Stop nor the context's stop
-	// func runs the callback, but both may be racing one that wants s.mu.
+	// Release the timers outside the lock. Stop and the context stop func do
+	// not run the callback, yet both may race a callback that wants s.mu.
 	if expiry != nil {
 		expiry.Stop()
 	}
 	if unwatch != nil {
 		unwatch()
 	}
-	// Keep the record briefly so a duplicate resolve is a 409, then drop it.
+	// Keep the record for the retention window so a duplicate resolve is a 409.
 	time.AfterFunc(s.timeout, func() { s.forget(id) })
 
 	now := s.now()
-	// Audit before unblocking the waiter: the gateway resumes the tool call the
-	// instant it reads the channel, and the record of *why* must not trail the
-	// effect. Sinks are non-blocking by contract, so this costs nothing real.
+	// Audit before unblocking the waiter: the gateway resumes the tool call as
+	// soon as it reads the channel, so the record of the decision has to land
+	// first. Sinks are non-blocking by contract.
 	s.sink.Emit(context.Background(), audit.Event{
 		Time:    now,
 		Type:    audit.EventApprovalResolved,
@@ -262,8 +262,8 @@ type PendingView struct {
 	Args    json.RawMessage `json:"args,omitempty"`
 	Rule    string          `json:"rule,omitempty"`
 	Created time.Time       `json:"created"`
-	// Age is how long the call has been waiting. It is serialized as
-	// age_seconds because a raw time.Duration marshals to nanoseconds.
+	// Age is how long the call has been waiting. The wire form is
+	// age_seconds, because a raw time.Duration marshals to nanoseconds.
 	Age        time.Duration `json:"-"`
 	AgeSeconds float64       `json:"age_seconds"`
 }

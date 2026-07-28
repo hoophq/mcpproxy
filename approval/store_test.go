@@ -53,7 +53,7 @@ func recv(t *testing.T, ch <-chan bool) bool {
 	}
 }
 
-// mustNoVerdict asserts the waiter can never observe a second decision. A
+// mustNoVerdict asserts the waiter cannot observe a second decision. A
 // closed, drained channel satisfies that; a fresh value does not.
 func mustNoVerdict(t *testing.T, ch <-chan bool) {
 	t.Helper()
@@ -87,7 +87,7 @@ func TestHoldApproveDeliversTrueOnce(t *testing.T) {
 		t.Fatal("verdict = false, want true")
 	}
 	// Exactly once: the channel is drained and closed, so no second verdict
-	// can ever be observed.
+	// reaches the waiter.
 	if _, ok := <-ch; ok {
 		t.Fatal("channel still open after resolution")
 	}
@@ -142,8 +142,8 @@ func TestHoldExpiryAutoRejects(t *testing.T) {
 	if got := recv(t, ch); got {
 		t.Fatal("expired call was approved, want auto-reject")
 	}
-	// Failing closed must be visible in the audit trail, distinguishable from
-	// a reviewer's deliberate rejection.
+	// Failing closed shows up in the audit trail, distinguishable from a
+	// reviewer's deliberate rejection.
 	evs := rec.events()
 	if len(evs) != 1 {
 		t.Fatalf("emitted %d events, want 1", len(evs))
@@ -219,8 +219,8 @@ func TestResolveErrors(t *testing.T) {
 	mustNoVerdict(t, ch)
 }
 
-// TestResolveRaceSingleWinner drives many concurrent resolvers at one call:
-// exactly one must succeed, and exactly one verdict must reach the waiter.
+// TestResolveRaceSingleWinner drives many concurrent resolvers at one call.
+// One must succeed, and one verdict must reach the waiter.
 func TestResolveRaceSingleWinner(t *testing.T) {
 	t.Parallel()
 	s := New(time.Minute, nil)
@@ -311,7 +311,7 @@ func TestListReflectsPendingSet(t *testing.T) {
 		}
 	}
 
-	// Resolving removes it from the pending set immediately, even though the
+	// Resolving removes it from the pending set at once, even though the
 	// record lingers for duplicate detection.
 	if err := s.Resolve(ids[1], true); err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -336,8 +336,8 @@ func TestListReflectsPendingSet(t *testing.T) {
 	}
 }
 
-// Malformed params must not poison the listing: the view drops them rather
-// than emitting invalid JSON to the reviewer.
+// Malformed params must not poison the listing. The view drops them instead
+// of emitting invalid JSON to the reviewer.
 func TestListDropsInvalidArgs(t *testing.T) {
 	t.Parallel()
 	s := New(time.Minute, nil)

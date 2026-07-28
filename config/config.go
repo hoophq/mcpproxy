@@ -78,8 +78,8 @@ type Backend struct {
 	// "none" | "static" (Headers carry it) | "passthrough" | "oauth".
 	Auth string `yaml:"auth,omitempty"`
 
-	// OAuth holds manual OAuth client settings; empty fields are
-	// auto-discovered (RFC 9728/8414) and DCR-registered (RFC 7591).
+	// OAuth holds manual OAuth client settings. The client discovers empty
+	// fields (RFC 9728/8414) and registers itself via DCR (RFC 7591).
 	OAuth *OAuthClient `yaml:"oauth,omitempty"`
 
 	// Policy overrides global policy for this backend.
@@ -108,7 +108,7 @@ type Policy struct {
 	ApprovalTools []string `yaml:"approval_tools,omitempty"`
 
 	// BlockSampling / BlockElicitation gate server-initiated requests.
-	// Default true (deny) — nil means unset, resolved to true.
+	// Default true (deny). nil means unset and resolves to true.
 	BlockSampling    *bool `yaml:"block_sampling,omitempty"`
 	BlockElicitation *bool `yaml:"block_elicitation,omitempty"`
 
@@ -162,9 +162,9 @@ type AuthServer struct {
 type Optimizer struct {
 	// TopK tools exposed per tools/list based on session purpose. 0 = off.
 	TopK int `yaml:"top_k"`
-	// Purpose is matched against tool name+description with the built-in
-	// lexical scorer. (Embedding providers can be added behind the same
-	// interface.)
+	// Purpose feeds the built-in lexical scorer, which matches it against
+	// tool name+description. Embedding providers plug in behind the same
+	// interface.
 	Purpose string `yaml:"purpose,omitempty"`
 }
 

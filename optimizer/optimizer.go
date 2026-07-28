@@ -1,15 +1,15 @@
-// Package optimizer trims a tools/list response down to the tools that
-// actually matter for the session's stated purpose.
+// Package optimizer trims a tools/list response down to the tools that matter
+// for the session's stated purpose.
 //
 // Context windows are finite and MCP servers are generous: a handful of
-// aggregated backends easily advertises two hundred tools, most of which are
-// noise for any given task. Ranking tools against a purpose string and
-// keeping the top K shrinks the prompt and, incidentally, the attack surface
-// — a tool the model never sees is a tool it cannot be talked into calling.
+// aggregated backends advertises two hundred tools, most of them noise for any
+// given task. Ranking tools against a purpose string and keeping the top K
+// shrinks the prompt. It also shrinks the attack surface, since a tool absent
+// from the catalog is a tool the model cannot be steered into calling.
 //
-// The default scorer is lexical (no network, no model, deterministic, and
-// testable). Swap in an embedding-backed Scorer when semantic recall matters
-// more than determinism; the Check does not care which it got.
+// The default scorer is lexical: no network, no model, and deterministic under
+// test. Swap in an embedding-backed Scorer when semantic recall matters more
+// than determinism; the Check does not care which it got.
 package optimizer
 
 import (
@@ -27,13 +27,13 @@ import (
 	"github.com/hoophq/mcpproxy/mcp"
 )
 
-// Scorer ranks a tool's relevance to a purpose. Higher is more relevant;
-// scores are only ever compared against each other, so any monotonic scale
-// works. Implementations must be safe for concurrent use.
+// Scorer ranks a tool's relevance to a purpose. Higher is more relevant.
+// Scores are compared only against each other, so any monotonic scale works.
+// Implementations must be safe for concurrent use.
 //
-// The lexical default is deliberately simple. An embedding implementation
-// would cache purpose and tool vectors and return cosine similarity here;
-// nothing else in this package changes.
+// The lexical default stays simple. An embedding implementation would cache
+// purpose and tool vectors and return cosine similarity here; nothing else in
+// this package changes.
 type Scorer interface {
 	Score(purpose, toolName, toolDesc string) float64
 }
@@ -48,7 +48,7 @@ type Optimizer struct {
 
 // New builds the filter. A nil scorer selects the built-in lexical scorer; a
 // nil sink discards audit events. TopK <= 0 or an empty purpose makes the
-// check a pass-through, so it is always safe to install unconditionally.
+// check a pass-through, so a caller can install it in every pipeline.
 func New(cfg config.Optimizer, sink audit.Sink, scorer Scorer) *Optimizer {
 	if scorer == nil {
 		scorer = Lexical{}
@@ -71,8 +71,8 @@ func (o *Optimizer) Name() string { return "optimizer" }
 func (o *Optimizer) Enabled() bool { return o.topK > 0 && strings.TrimSpace(o.purpose) != "" }
 
 // Inspect implements inspect.Check. It rewrites tools/list results in place
-// and always returns Allow: relevance is a hint, never a policy verdict, so
-// a scoring mistake must not be able to break a session.
+// and returns Allow every time: relevance is a hint, not a policy verdict, so
+// a scoring mistake cannot break a session.
 func (o *Optimizer) Inspect(ctx context.Context, s inspect.Session, m *inspect.Msg) inspect.Decision {
 	if !o.Enabled() || m.Dir != inspect.S2C || m.Env == nil {
 		return inspect.AllowAll
@@ -86,7 +86,7 @@ func (o *Optimizer) Inspect(ctx context.Context, s inspect.Session, m *inspect.M
 	var res mcp.ToolsListResult
 	if err := json.Unmarshal(m.Env.Result, &res); err != nil {
 		// Malformed or non-standard payload: pass it through untouched
-		// rather than risk corrupting a response we do not understand.
+		// rather than corrupt a response we do not understand.
 		return inspect.AllowAll
 	}
 	total := len(res.Tools)
@@ -100,8 +100,8 @@ func (o *Optimizer) Inspect(ctx context.Context, s inspect.Session, m *inspect.M
 	}
 	res.Tools = kept
 
-	// Re-marshal only on success; a failure here leaves m.Env.Result as it
-	// was, which is the correct degradation.
+	// Re-marshal only on success. A failure here leaves m.Env.Result as it
+	// was, so the client still gets the full catalog.
 	raw, err := json.Marshal(res)
 	if err != nil {
 		return inspect.AllowAll
@@ -132,23 +132,23 @@ func (o *Optimizer) Inspect(ctx context.Context, s inspect.Session, m *inspect.M
 // original catalog order, plus the names of the entries removed.
 //
 // Preserving catalog order matters: clients and users read tools/list output,
-// and reordering it on every call for no functional gain is gratuitous churn.
+// and reshuffling it on every call would churn that view for no gain.
 func (o *Optimizer) rank(tools []json.RawMessage) (kept []json.RawMessage, dropped []string) {
 	names := make([]string, len(tools))
 	scores := make([]float64, len(tools))
 	order := make([]int, len(tools))
 	for i, raw := range tools {
 		var t mcp.Tool
-		// An entry we cannot parse scores as an empty tool: it sinks to the
-		// bottom rather than being silently privileged.
+		// An entry we cannot parse scores as an empty tool, so it sinks to
+		// the bottom instead of getting a free pass into the kept set.
 		_ = json.Unmarshal(raw, &t)
 		names[i] = t.Name
 		scores[i] = o.scorer.Score(o.purpose, t.Name, t.Description)
 		order[i] = i
 	}
 
-	// Score desc, catalog index asc — ties resolve deterministically to the
-	// server's own ordering.
+	// Score desc, catalog index asc. Ties fall back to the server's own
+	// ordering, which keeps the output stable across calls.
 	slices.SortFunc(order, func(a, b int) int {
 		if c := cmp.Compare(scores[b], scores[a]); c != 0 {
 			return c
@@ -176,15 +176,14 @@ func (o *Optimizer) rank(tools []json.RawMessage) (kept []json.RawMessage, dropp
 // match found anywhere in the tool's name or description, weighting name
 // matches above description matches and exact matches above prefix matches.
 //
-// Best-match-per-token rather than raw term frequency, because a tool whose
-// description says "issue" eleven times is not eleven times more relevant
-// than one that says it once — it is just chatty. Taking the max per purpose
-// token makes the score a coverage measure: how much of the purpose does
-// this tool address?
+// Best match per token beats raw term frequency. A description repeating
+// "issue" eleven times is chatty, and no more relevant than one that says it
+// once. Taking the max per purpose token turns the score into a coverage
+// measure: how much of the purpose the tool addresses.
 //
-// It is not semantic and makes no pretense of being so. It reliably ranks
-// "list_issues" above "get_weather" for the purpose "github issues", which
-// is the bar for a default that must never call out to a model.
+// Matching is lexical, with no embeddings and no model call. It ranks
+// "list_issues" above "get_weather" for the purpose "github issues", which is
+// the bar for a default that must stay off the network.
 type Lexical struct{}
 
 // Score implements Scorer. The result is in [0, nameExact], normalized by
@@ -235,10 +234,9 @@ func bestMatch(p string, tokens []string, exact, prefix float64) float64 {
 	return best
 }
 
-// stem folds the two plural forms that actually appear in tool names, so
-// "issue"/"issues" and "repository"/"repositories" unify. A real stemmer
-// would be overkill: tool names are short, mostly English, and mostly nouns
-// and verbs in exactly these forms.
+// stem folds the two plural forms that appear in tool names, so
+// "issue"/"issues" and "repository"/"repositories" unify. A real stemmer buys
+// nothing here: tool names are short English nouns and verbs in these forms.
 func stem(t string) string {
 	switch {
 	case len(t) > 4 && strings.HasSuffix(t, "ies"):
@@ -250,14 +248,14 @@ func stem(t string) string {
 }
 
 const (
-	// Name matches dominate description matches: tool names are curated,
-	// descriptions ramble and often mention adjacent concepts in passing.
+	// Name matches dominate description matches. Somebody curated the tool
+	// name; descriptions ramble and mention adjacent concepts in passing.
 	nameExact  = 1.0
 	namePrefix = 0.6
 	descExact  = 0.35
 	descPrefix = 0.2
-	// minPrefix keeps short tokens ("id", "to", "get") from matching
-	// everything via the prefix rule.
+	// minPrefix keeps short tokens ("id", "to", "get") from matching half
+	// the catalog through the prefix rule.
 	minPrefix = 4
 )
 

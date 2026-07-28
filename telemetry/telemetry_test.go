@@ -14,10 +14,10 @@ import (
 	"github.com/hoophq/mcpproxy/inspect"
 )
 
-// observer mirrors gateway.Observer. Restating it here rather than importing
-// gateway keeps the dependency arrow one-way (gateway does not import
-// telemetry, and telemetry must not import gateway) while still failing the
-// build if the method signature ever drifts.
+// observer mirrors gateway.Observer. Restating it here instead of importing
+// gateway keeps the dependency arrow one-way: gateway does not import
+// telemetry, and telemetry must not import gateway. The build still breaks
+// if the method signature drifts.
 type observer interface {
 	ObserveMessage(dir inspect.Direction, backendName, method, tool, decision string, dur time.Duration)
 }
@@ -108,7 +108,7 @@ func TestObserveMessageDuration(t *testing.T) {
 	tel := metricsEnabled(t)
 
 	// Two calls differing only in the tool label must land in one histogram
-	// series: tool is excluded from the histogram on purpose.
+	// series, since the histogram omits the tool dimension.
 	tel.ObserveMessage(inspect.C2S, "github", "tools/call", "list_issues", "allow", 20*time.Millisecond)
 	tel.ObserveMessage(inspect.C2S, "github", "tools/call", "create_pr", "allow", 30*time.Millisecond)
 
@@ -210,8 +210,8 @@ func TestNoopSafety(t *testing.T) {
 	}
 }
 
-// A nil *Telemetry is a valid Observer: hosts that skip telemetry entirely
-// pass nil rather than branching at every call site.
+// A nil *Telemetry is a valid Observer. Hosts that skip telemetry pass nil
+// instead of branching at every call site.
 func TestNilReceiverSafety(t *testing.T) {
 	var tel *Telemetry
 	tel.ObserveMessage(inspect.S2C, "b", "m", "t", "kill", time.Second)
@@ -260,9 +260,9 @@ func TestConcurrentObserve(t *testing.T) {
 }
 
 // Tracing is configured independently of metrics. With only OTLP set there
-// must be no metrics handler, observation must still work, and — since the
-// collector here is unreachable — Shutdown must stay bounded by the caller's
-// context instead of retrying forever.
+// must be no metrics handler and observation must still work. The collector
+// here is unreachable, so Shutdown must stay bounded by the caller's context
+// instead of retrying forever.
 func TestTracingOnly(t *testing.T) {
 	start := time.Now()
 	tel, err := New(config.Telemetry{OTLPEndpoint: "127.0.0.1:1", ServiceName: "test"})
@@ -286,8 +286,8 @@ func TestTracingOnly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
 	start = time.Now()
-	// The error is expected (nothing is listening); the contract under test
-	// is that Shutdown honors the deadline rather than hanging the process.
+	// The error is expected, since nothing is listening. The contract under
+	// test is that Shutdown honors the deadline rather than hanging.
 	_ = tel.Shutdown(ctx)
 	if d := time.Since(start); d > deadline+2*time.Second {
 		t.Errorf("Shutdown took %v, want it bounded by the %v context", d, deadline)

@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// TestBuiltinValid is the gate that keeps the embedded catalog shippable:
-// every entry must satisfy the schema or the build is broken.
+// TestBuiltinValid gates the embedded catalog: every entry must satisfy the
+// schema, or the shipped binary carries a broken server list.
 func TestBuiltinValid(t *testing.T) {
 	t.Parallel()
 	c, err := Builtin()

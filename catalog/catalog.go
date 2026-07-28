@@ -1,9 +1,9 @@
 // Package catalog ships a built-in list of publicly hosted remote MCP
 // servers and converts entries into gateway backend configurations.
 //
-// The data lives in catalog.yaml (embedded); operators can also load their
-// own catalog file with the same schema, so an organization can curate an
-// internal server list without forking the code.
+// The data lives in catalog.yaml, embedded at build time. Operators can also
+// load their own catalog file with the same schema, so an organization can
+// curate an internal server list without forking the code.
 package catalog
 
 import (
@@ -36,8 +36,8 @@ type Catalog struct {
 	Servers map[string]Entry `yaml:"servers"`
 }
 
-// Builtin returns the embedded catalog. The embedded data is validated by
-// tests, so failure here means a broken build, not bad user input.
+// Builtin returns the embedded catalog. Tests validate the embedded data, so
+// a failure here means a broken build rather than bad user input.
 func Builtin() (*Catalog, error) {
 	return parse(builtinYAML)
 }
@@ -98,7 +98,7 @@ func (c *Catalog) Names() []string {
 }
 
 // Backend converts an entry into a gateway backend configuration.
-// Static-auth entries carry their header template verbatim — ${ENV}
+// Static-auth entries carry their header template verbatim; ${ENV}
 // placeholders resolve when the daemon loads the final config.
 func (e Entry) Backend() config.Backend {
 	b := config.Backend{
