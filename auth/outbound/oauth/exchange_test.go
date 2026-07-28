@@ -14,7 +14,7 @@ import (
 )
 
 // exchangeAS records every token request and answers with a token derived from
-// the subject it was given, so the test can prove which subject produced which
+// the subject it received, so a test can prove which subject produced which
 // upstream credential.
 type exchangeAS struct {
 	*httptest.Server
@@ -96,7 +96,7 @@ func TestExchangeSource_SendsRFC8693Request(t *testing.T) {
 			t.Errorf("%s = %q, want %q", k, got, want)
 		}
 	}
-	// A confidential client authenticates with Basic, not by putting the id in
+	// A confidential client authenticates with Basic and keeps the id out of
 	// the body.
 	if f.Has("client_id") {
 		t.Error("client_id must not be in the body for a confidential client")
@@ -249,7 +249,7 @@ func TestExchangeSource_ServerErrorSurfaces(t *testing.T) {
 }
 
 func TestHashToken_DoesNotLeakTheToken(t *testing.T) {
-	// The cache key ends up in memory dumps; it must not be the credential.
+	// The cache key ends up in memory dumps, so it must not be the credential.
 	const tok = "super-secret-jwt"
 	h := hashToken(tok)
 	if strings.Contains(h, tok) {

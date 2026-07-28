@@ -10,16 +10,16 @@ import (
 
 // FileStore persists grants in an AES-256-GCM encrypted file.
 //
-// Every operation re-reads the file before mutating it so that a second
-// gateway process (or an operator revoking a grant by hand) does not get its
-// writes clobbered by a stale in-memory snapshot.
+// Every operation re-reads the file before mutating it, so a stale in-memory
+// snapshot cannot clobber writes from a second gateway process or from an
+// operator revoking a grant by hand.
 type FileStore struct {
 	mu   sync.Mutex
 	file core.EncryptedFile
 }
 
-// storedGrants is the on-disk shape. JSON object keys must be strings, so the
-// GrantKey is flattened into a nested map rather than used directly.
+// storedGrants is the on-disk shape. JSON object keys must be strings, so this
+// flattens GrantKey into a nested map instead of using it directly.
 type storedGrants struct {
 	// Grants maps backend name → user ("" for backend-wide) → token.
 	Grants map[string]map[string]*Token `json:"grants"`
@@ -88,8 +88,8 @@ func (s *FileStore) Put(_ context.Context, k GrantKey, t *Token) error {
 	return s.file.WriteJSON(doc)
 }
 
-// Delete implements [TokenStore]. Deleting an absent key is not an error:
-// callers delete to guarantee absence, and they got what they asked for.
+// Delete implements [TokenStore]. Deleting an absent key succeeds: the caller
+// wanted the key gone, and it is gone.
 func (s *FileStore) Delete(_ context.Context, k GrantKey) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

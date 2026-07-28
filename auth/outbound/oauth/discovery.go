@@ -29,8 +29,8 @@ const (
 )
 
 // maxMetadataBytes caps a metadata response. Discovery URLs come from a remote
-// server we do not yet trust, so an unbounded read is a free memory-exhaustion
-// vector. Real documents are a few kilobytes.
+// server the gateway does not yet trust, so an unbounded read hands out a free
+// memory-exhaustion vector. Real documents run a few kilobytes.
 const maxMetadataBytes = 1 << 20
 
 // Challenge is a parsed WWW-Authenticate header.
@@ -40,7 +40,7 @@ type Challenge struct {
 	// Realm is the realm parameter, often the issuer URL.
 	Realm string
 	// ResourceMetadataURL is the RFC 9728 resource_metadata parameter: the
-	// server telling us exactly where its protected-resource metadata lives.
+	// server's pointer to its own protected-resource metadata.
 	ResourceMetadataURL string
 	// Scope is the space-delimited scope parameter, if present.
 	Scope string
@@ -53,9 +53,9 @@ type Challenge struct {
 
 // ParseWWWAuthenticate parses a WWW-Authenticate header value.
 //
-// Only the token-based schemes matter here: a Basic or Digest challenge from an
-// MCP server means the operator configured the wrong auth mode, and reporting
-// that plainly beats a vague parse failure.
+// Only the token-based schemes matter here. A Basic or Digest challenge from
+// an MCP server means the operator configured the wrong auth mode, and saying
+// so beats a vague parse failure.
 func ParseWWWAuthenticate(header string) (*Challenge, error) {
 	header = strings.TrimSpace(header)
 	if header == "" {
@@ -84,7 +84,7 @@ func ParseWWWAuthenticate(header string) (*Challenge, error) {
 // parseAuthParams splits a challenge's `name=value` list.
 //
 // It scans character by character instead of splitting on commas because
-// quoted values legitimately contain commas (a scope list, an error
+// quoted values contain commas of their own (a scope list, an error
 // description) and a naive split truncates them mid-value.
 func parseAuthParams(s string) map[string]string {
 	params := make(map[string]string)
@@ -99,7 +99,7 @@ func parseAuthParams(s string) map[string]string {
 			i++
 		}
 		if i >= n || s[i] != '=' {
-			// A bare token (e.g. a base64 credential) carries no name; skip it.
+			// A bare token such as a base64 credential carries no name; skip it.
 			continue
 		}
 		name := strings.TrimSpace(s[start:i])
@@ -163,9 +163,9 @@ type ASMetadata struct {
 }
 
 // SupportsS256 reports whether the server advertises S256 PKCE. A server that
-// advertises no methods at all predates RFC 8414's capability fields; we assume
-// S256 there rather than refusing to talk to it, since sending a challenge to a
-// server that ignores PKCE is harmless.
+// advertises no methods predates RFC 8414's capability fields, so this assumes
+// S256 rather than refusing to talk to it: sending a challenge to a server
+// that ignores PKCE costs nothing.
 func (m *ASMetadata) SupportsS256() bool {
 	if len(m.CodeChallengeMethodsSupported) == 0 {
 		return true
@@ -180,13 +180,13 @@ func (m *ASMetadata) SupportsS256() bool {
 
 // FetchResourceMetadata retrieves RFC 9728 metadata for a protected resource.
 //
-// resourceURL may be either the resource itself (whose base and path are turned
-// into well-known candidates) or a resource_metadata URL handed to us in a
-// WWW-Authenticate challenge, in which case it is tried verbatim first.
+// resourceURL is either the resource itself, whose base and path become
+// well-known candidates, or a resource_metadata URL from a WWW-Authenticate
+// challenge, which this tries verbatim first.
 //
-// Per RFC 9728 §3.1 the path-suffixed form is tried before the root form: a
-// host serving several MCP endpoints publishes per-endpoint metadata, and the
-// root document (if any) describes something else.
+// Per RFC 9728 §3.1 the path-suffixed form comes before the root form. A host
+// serving several MCP endpoints publishes per-endpoint metadata, and its root
+// document describes something else.
 func FetchResourceMetadata(ctx context.Context, resourceURL string, hc *http.Client) (*ResourceMetadata, error) {
 	u, err := url.Parse(resourceURL)
 	if err != nil {
@@ -232,14 +232,14 @@ func FetchResourceMetadata(ctx context.Context, resourceURL string, hc *http.Cli
 // Candidates, in order: RFC 8414 path-insertion
 // ({host}/.well-known/oauth-authorization-server{/path}), then OIDC Discovery
 // ({issuer}/.well-known/openid-configuration). The RFC 8414 form comes first
-// because an issuer with a path component publishes there, and the OIDC
-// suffix form would 404 or — worse — return a different tenant's document.
+// because an issuer with a path component publishes there, while the OIDC
+// suffix form would 404 or return a different tenant's document.
 //
-// An issuer mismatch is tolerated: the document's own issuer wins. Real
-// deployments host metadata on a different origin than the issuer identifier
-// (Stripe being the canonical example), and refusing them would break the
-// gateway for no security gain, since every endpoint we then use comes from
-// that same document.
+// An issuer mismatch is tolerated and the document's own issuer wins. Real
+// deployments host metadata on a different origin than the issuer identifier,
+// Stripe being the canonical example. Refusing them would break the gateway
+// for no security gain, since every endpoint used afterward comes from that
+// same document.
 func FetchASMetadata(ctx context.Context, issuer string, hc *http.Client) (*ASMetadata, error) {
 	u, err := url.Parse(issuer)
 	if err != nil {
@@ -318,9 +318,9 @@ func fetchJSON(ctx context.Context, hc *http.Client, rawURL string, v any) error
 
 // checkTransportSecurity enforces HTTPS for metadata fetches.
 //
-// Plain HTTP is allowed only for loopback, which is what local development and
-// every httptest server in this package uses; anywhere else it would let a
-// network attacker rewrite the endpoints we are about to send credentials to.
+// Plain HTTP is allowed only for loopback, which covers local development and
+// every httptest server in this package. Anywhere else it would let a network
+// attacker rewrite the endpoints about to receive credentials.
 func checkTransportSecurity(u *url.URL) error {
 	if u.Scheme == "https" {
 		return nil

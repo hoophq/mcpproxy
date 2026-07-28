@@ -9,10 +9,10 @@ import (
 // UpstreamAuthHeader carries a client-supplied upstream credential on the
 // inbound MCP request.
 //
-// It is deliberately not "Authorization": that header authenticates the client
-// to the gateway. A client talking to a passthrough backend needs to present
-// two credentials — one for us, one for the MCP server behind us — so the
-// second gets its own header rather than overloading the first.
+// The name avoids "Authorization" because that header authenticates the client
+// to the gateway. A client talking to a passthrough backend presents two
+// credentials, one for the gateway and one for the MCP server behind it, so
+// the second gets its own header instead of overloading the first.
 const UpstreamAuthHeader = "X-Mcpproxy-Upstream-Authorization"
 
 type clientTokenCtxKey struct{}
@@ -20,9 +20,9 @@ type clientTokenCtxKey struct{}
 // WithClientToken records the client-supplied upstream credential on ctx.
 //
 // The daemon's HTTP middleware reads [UpstreamAuthHeader], strips any "Bearer "
-// prefix, and calls this; [NewPassthrough] is the other half. Splitting it in
-// two keeps the token source free of any HTTP dependency, so stdio backends and
-// tests can inject a credential without faking a request.
+// prefix, and calls this; [NewPassthrough] is the other half. The split keeps
+// the token source free of any HTTP dependency, so stdio backends and tests
+// can inject a credential without faking a request.
 func WithClientToken(ctx context.Context, token string) context.Context {
 	return context.WithValue(ctx, clientTokenCtxKey{}, token)
 }
@@ -47,10 +47,9 @@ func TrimBearer(v string) string {
 // NewPassthrough returns a source that forwards the client-supplied upstream
 // credential from the request context.
 //
-// A missing credential is an error rather than a silent empty token: the
-// backend was configured to require the caller's own identity, so proxying the
-// call anonymously would either fail upstream with a worse message or, worse,
-// succeed as some other principal.
+// A missing credential returns an error instead of a silent empty token. The
+// backend requires the caller's own identity, so an anonymous call would fail
+// upstream with a worse message or succeed as some other principal.
 func NewPassthrough() TokenSource {
 	return func(ctx context.Context) (string, error) {
 		tok, ok := ClientTokenFrom(ctx)

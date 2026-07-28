@@ -29,8 +29,8 @@ func TestNewNone(t *testing.T) {
 func TestPassthrough(t *testing.T) {
 	src := NewPassthrough()
 
-	// A passthrough backend requires the caller's identity; proxying the call
-	// anonymously would fail upstream or, worse, succeed as another principal.
+	// A passthrough backend requires the caller's identity. An anonymous call
+	// would fail upstream or succeed as another principal.
 	if _, err := src(context.Background()); err == nil {
 		t.Fatal("expected an error when no client token is on the context")
 	} else if !strings.Contains(err.Error(), UpstreamAuthHeader) {
@@ -48,7 +48,7 @@ func TestPassthrough(t *testing.T) {
 }
 
 func TestClientTokenFrom_EmptyIsAbsent(t *testing.T) {
-	// An empty header value is indistinguishable from no header at all.
+	// An empty header value reads the same as no header at all.
 	if _, ok := ClientTokenFrom(WithClientToken(context.Background(), "")); ok {
 		t.Error("an empty client token must report as absent")
 	}
@@ -95,8 +95,8 @@ func TestInboundTokenContext(t *testing.T) {
 }
 
 func TestContextKeysDoNotCollide(t *testing.T) {
-	// User, client token, and inbound token ride the same context; a shared
-	// key type would silently return one for another.
+	// User, client token, and inbound token ride the same context, and a
+	// shared key type would return one in place of another.
 	ctx := WithUser(context.Background(), "alice")
 	ctx = WithClientToken(ctx, "client-cred")
 	ctx = WithInboundToken(ctx, "inbound-jwt")

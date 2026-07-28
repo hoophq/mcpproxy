@@ -1,7 +1,7 @@
 // Package outbound provides token sources for gateway→MCP-server
 // authentication.
 //
-// Everything here ultimately produces a [TokenSource]: a function the backend
+// Every source here produces a [TokenSource]: a function the backend
 // transport calls once per outbound request to obtain the bearer credential.
 // Returning an empty string means "send no Authorization header", which keeps
 // the "auth: none" case on the same code path as every other mode instead of
@@ -27,8 +27,9 @@ type (
 	// TokenSource yields the credential for one outbound request.
 	//
 	// An empty token with a nil error means "no Authorization header": callers
-	// MUST treat that as success, not as a missing credential. Implementations
-	// are called on the request path and must be safe for concurrent use.
+	// MUST treat that as success, not as a missing credential. The backend
+	// transport calls implementations on the request path, so they must be
+	// safe for concurrent use.
 	TokenSource = core.TokenSource
 
 	// GrantKey identifies a stored grant.
@@ -52,9 +53,9 @@ type (
 // KeySize is the AES-256 key length a keyfile must contain.
 const KeySize = core.KeySize
 
-// ErrNotFound is returned by [TokenStore.Get] when no grant is stored for the
-// key. It is an expected condition — the signal to start an authorization
-// flow — not a failure.
+// ErrNotFound reports that no grant is stored for the key. [TokenStore.Get]
+// returns it to signal that a caller should start an authorization flow, not
+// that storage broke.
 var ErrNotFound = core.ErrNotFound
 
 // LoadOrCreateKey reads a 32-byte raw AES key from path, generating one with
@@ -70,8 +71,8 @@ func WithUser(ctx context.Context, user string) context.Context {
 }
 
 // UserFrom returns the subject recorded by [WithUser]. The boolean is false
-// when no user is present, which for a per_user backend is a hard error rather
-// than a reason to fall back to a shared grant.
+// when no user is present. A per_user backend treats that as a hard error and
+// does not fall back to a shared grant.
 func UserFrom(ctx context.Context) (string, bool) {
 	u, ok := ctx.Value(userCtxKey{}).(string)
 	return u, ok && u != ""
@@ -80,9 +81,9 @@ func UserFrom(ctx context.Context) (string, bool) {
 type inboundTokenCtxKey struct{}
 
 // WithInboundToken records the raw bearer token the caller presented to the
-// gateway. RFC 8693 exchange uses it as the subject token, so the upstream
-// credential is derived from the caller's own proof of identity rather than
-// from a shared service account.
+// gateway. RFC 8693 exchange uses it as the subject token, deriving the
+// upstream credential from the caller's own proof of identity instead of a
+// shared service account.
 func WithInboundToken(ctx context.Context, token string) context.Context {
 	return context.WithValue(ctx, inboundTokenCtxKey{}, token)
 }

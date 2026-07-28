@@ -13,9 +13,9 @@ import (
 	"github.com/hoophq/mcpproxy/config"
 )
 
-// Deps carries the process-wide collaborators [Resolve] needs. All fields are
-// optional; a mode that requires one reports a clear error when it is absent
-// rather than failing later on the request path.
+// Deps carries the process-wide collaborators [Resolve] needs. Every field is
+// optional. A mode that requires one reports a clear error at startup instead
+// of failing later on the request path.
 type Deps struct {
 	// Store persists OAuth grants. Defaults to an in-memory store, which means
 	// every restart forces a re-authorization.
@@ -23,8 +23,8 @@ type Deps struct {
 
 	// Authorizer drives the interactive half of the authorization-code flow.
 	// Without it, an oauth backend with no stored grant reports that
-	// re-authorization is required instead of hanging on a browser that will
-	// never open.
+	// re-authorization is required instead of hanging on a browser nobody
+	// will open.
 	Authorizer oauth.Authorizer
 
 	// ClientStore persists dynamically registered clients, keyed by issuer.
@@ -34,13 +34,13 @@ type Deps struct {
 	// Defaults to reading the value the gateway middleware put on the context.
 	InboundToken func(ctx context.Context) (string, error)
 
-	// UpstreamSwap, when set, supersedes the configured OAuth mode: the
+	// UpstreamSwap, when set, supersedes the configured OAuth mode. The
 	// embedded auth server already federated the user to the upstream IdP and
 	// hands back an upstream credential directly, so re-running a flow here
 	// would prompt the same user twice.
 	UpstreamSwap TokenSource
 
-	// HTTPClient is used for every OAuth HTTP call.
+	// HTTPClient carries every OAuth HTTP call.
 	HTTPClient *http.Client
 
 	// Logger defaults to slog.Default().
@@ -49,13 +49,13 @@ type Deps struct {
 
 // Resolve builds the outbound token source for one backend.
 //
-// It is called once per backend at startup, so discovery and dynamic client
-// registration happen here rather than on the first tool call; a
-// misconfiguration surfaces as a boot failure instead of a mystery 401
-// minutes later.
+// The gateway calls it once per backend at startup, so discovery and dynamic
+// client registration happen there rather than on the first tool call. A
+// misconfiguration surfaces as a boot failure instead of a mystery 401 minutes
+// later.
 func Resolve(ctx context.Context, backendName string, cfg config.Backend, deps Deps) (TokenSource, error) {
-	// stdio backends run as a local subprocess; there is no HTTP request to
-	// attach a credential to, and auth for them is the process environment.
+	// A stdio backend runs as a local subprocess. No HTTP request exists to
+	// carry a credential, and the process environment supplies its auth.
 	if cfg.Transport == "stdio" {
 		return NewNone(), nil
 	}
@@ -65,9 +65,10 @@ func Resolve(ctx context.Context, backendName string, cfg config.Backend, deps D
 		return NewNone(), nil
 
 	case "static":
-		// The secret rides in Headers so it can be named per provider
-		// (Authorization, X-Api-Key, ...); an explicit Authorization header is
-		// promoted to the token source so the transport applies it uniformly.
+		// The secret rides in Headers so an operator can name it per provider
+		// (Authorization, X-Api-Key, and so on). Resolve promotes an explicit
+		// Authorization header to the token source so the transport applies it
+		// uniformly.
 		return NewStatic(TrimBearer(cfg.Headers["Authorization"])), nil
 
 	case "passthrough":
@@ -91,8 +92,8 @@ func resolveOAuth(ctx context.Context, backendName string, cfg config.Backend, d
 		logger = slog.Default()
 	}
 
-	// The embedded auth server owns the upstream relationship when it is
-	// federating; running our own flow on top would double-prompt.
+	// The embedded auth server owns the upstream relationship while it
+	// federates; a second flow on top would prompt the user twice.
 	if deps.UpstreamSwap != nil {
 		return deps.UpstreamSwap, nil
 	}
@@ -138,9 +139,9 @@ func resolveOAuth(ctx context.Context, backendName string, cfg config.Backend, d
 		store = NewMemoryStore()
 	}
 
-	// Per-user backends need one source per caller, so the key is resolved on
-	// each request; shared backends resolve it once and reuse the source (and
-	// with it the refresh singleflight and the cached token).
+	// A per-user backend needs one source per caller, so it resolves the key
+	// on each request. A shared backend resolves the key once and reuses the
+	// source, along with its refresh singleflight and cached token.
 	if oc.PerUser {
 		return newPerUserSource(backendName, store, clientCfg, deps.Authorizer, logger), nil
 	}
@@ -180,8 +181,8 @@ func discoverAS(
 			backendName)
 	}
 
-	// Try each advertised server: the first is the resource's preference, but
-	// a server that fails discovery is no use to us.
+	// Try each advertised server in order. The first is the resource's
+	// preference, and a server that fails discovery is unusable.
 	var lastErr error
 	for _, issuer := range rm.AuthorizationServers {
 		md, err := oauth.FetchASMetadata(ctx, issuer, deps.HTTPClient)
@@ -214,9 +215,9 @@ func resolveClient(
 			"outbound: %s does not advertise S256 PKCE; refusing to register a public client without it", md.Issuer)
 	}
 
-	// The redirect URI registered here is a placeholder loopback: the actual
-	// port is chosen when the flow runs. Servers that require an exact match
-	// need a manually configured client, which is why the config exposes one.
+	// The redirect URI registered here is a placeholder loopback; the flow
+	// picks the real port when it runs. Servers that demand an exact match
+	// need a manually configured client, which the config exposes.
 	return oauth.EnsureClient(ctx, deps.ClientStore, md.Issuer, md.RegistrationEndpoint,
 		[]string{"http://127.0.0.1/callback"}, oc.Scopes,
 		oauth.RegisterOptions{ClientName: "mcpproxy", HTTPClient: deps.HTTPClient})
@@ -309,9 +310,9 @@ func (s *perUserSource) token(ctx context.Context) (string, error) {
 	return src(ctx)
 }
 
-// inboundTokenFromContext is the default subject-token source for RFC 8693:
-// whatever the gateway middleware recorded from the inbound Authorization
-// header.
+// inboundTokenFromContext is the default subject-token source for RFC 8693,
+// returning the token the gateway middleware recorded from the inbound
+// Authorization header.
 func inboundTokenFromContext(ctx context.Context) (string, error) {
 	tok, ok := InboundTokenFrom(ctx)
 	if !ok {

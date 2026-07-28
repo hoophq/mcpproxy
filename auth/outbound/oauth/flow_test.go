@@ -15,8 +15,8 @@ import (
 	"time"
 )
 
-// fakeAS is an authorization server that implements just enough of RFC 6749 +
-// RFC 7636 to prove the flow end to end: it records the challenge presented at
+// fakeAS is an authorization server implementing enough of RFC 6749 and
+// RFC 7636 to prove the flow end to end. It records the challenge presented at
 // /authorize and refuses to issue a token unless the verifier presented at
 // /token hashes to it.
 type fakeAS struct {
@@ -60,7 +60,7 @@ func (as *fakeAS) clientCfg() ClientConfig {
 }
 
 // handleAuthorize issues a code bound to the presented challenge and redirects
-// straight back, standing in for a user who instantly approves.
+// to the callback, standing in for a user who approves at once.
 func (as *fakeAS) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	as.mu.Lock()
@@ -147,7 +147,7 @@ func (as *fakeAS) authQuery() url.Values {
 }
 
 // scriptedAuthorizer follows the authorization URL with an HTTP client that
-// does not auto-follow, then reads the code out of the redirect — exactly what
+// does not auto-follow, then reads the code out of the redirect, matching what
 // a browser would deliver to a real redirect handler.
 type scriptedAuthorizer struct {
 	client      *http.Client
@@ -208,8 +208,8 @@ func TestAuthorize_FullPKCEFlow(t *testing.T) {
 	if tok.Expiry.IsZero() || time.Until(tok.Expiry) < 30*time.Minute {
 		t.Errorf("expiry = %v, want ~1h out", tok.Expiry)
 	}
-	// The id_token is unrecoverable once the code is burned, so it must survive
-	// the round trip.
+	// The id_token is unrecoverable once the code is burned, so it has to
+	// survive the round trip.
 	if tok.Extra["id_token"] != "jwt-here" {
 		t.Errorf("extra id_token = %q", tok.Extra["id_token"])
 	}
@@ -238,7 +238,7 @@ func TestAuthorize_FullPKCEFlow(t *testing.T) {
 	if tf.Get("code_verifier") == "" {
 		t.Error("token request carried no code_verifier")
 	}
-	// A public client must send client_id in the body: strict OAuth 2.1
+	// A public client must send client_id in the body. Strict OAuth 2.1
 	// servers reject Basic for token_endpoint_auth_method=none and burn the
 	// single-use code doing it.
 	if tf.Get("client_id") != "test-client" {
@@ -250,8 +250,8 @@ func TestAuthorize_FullPKCEFlow(t *testing.T) {
 }
 
 func TestAuthorize_WrongVerifierRejected(t *testing.T) {
-	// Proves the fake AS actually enforces PKCE, so the happy-path test above
-	// is not vacuous.
+	// Proves the fake AS enforces PKCE, so the happy-path test above is not
+	// vacuous.
 	as := newFakeAS(t)
 	cfg := as.clientCfg()
 
@@ -362,8 +362,8 @@ func TestLoopbackAuthorizer_DeliversCode(t *testing.T) {
 
 	done := make(chan struct{})
 	az.Prompt = func(string) {
-		// The listener is serving by the time the prompt fires, so the browser
-		// hit is safe to simulate here.
+		// The listener is serving by the time the prompt fires, so simulating
+		// the browser hit here is safe.
 		go func() {
 			defer close(done)
 			resp, err := http.Get(redirectURI + "?code=cb-code&state=the-state")
@@ -392,7 +392,7 @@ func TestLoopbackAuthorizer_DeliversCode(t *testing.T) {
 
 func TestLoopbackAuthorizer_RejectsStateMismatch(t *testing.T) {
 	// Without this check an attacker's callback injects their authorization
-	// code into our session (RFC 6749 §10.12).
+	// code into the gateway's session (RFC 6749 §10.12).
 	az := &LoopbackAuthorizer{Timeout: 5 * time.Second}
 	redirectURI, err := az.RedirectURI(context.Background())
 	if err != nil {

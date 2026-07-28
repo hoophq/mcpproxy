@@ -12,16 +12,16 @@ import (
 
 // ExpiryMargin is how early a token is treated as expired.
 //
-// A token that expires while in flight fails the request it was fetched for, so
-// renewal happens 30 seconds ahead of the stated expiry to cover clock skew
-// between us and the authorization server plus the upstream round trip.
+// A token that expires in flight fails the request it was fetched for, so
+// renewal runs 30 seconds ahead of the stated expiry to cover clock skew
+// against the authorization server plus the upstream round trip.
 const ExpiryMargin = 30 * time.Second
 
-// ErrReauthorize signals that a grant cannot be renewed without a human: no
-// refresh token was ever issued, or the server rejected the one we hold.
+// ErrReauthorize signals that a grant cannot be renewed without a human. The
+// server issued no refresh token, or it rejected the one the gateway holds.
 //
 // The gateway surfaces this to the caller as an actionable "run the login flow
-// for this backend" rather than retrying a grant that will never succeed.
+// for this backend" instead of retrying a grant that will keep failing.
 type ErrReauthorize struct {
 	Key    core.GrantKey
 	Reason string
@@ -69,17 +69,17 @@ type refreshingSource struct {
 	cfg   RefreshConfig
 
 	// mu serializes renewal for this key. Without it, a burst of concurrent
-	// tool calls on an expired token fires N parallel refreshes; servers that
-	// rotate refresh tokens invalidate the loser's token and leave the grant
-	// permanently broken.
+	// tool calls on an expired token fires N parallel refreshes; a server
+	// that rotates refresh tokens then invalidates the loser's token and
+	// leaves the grant broken for good.
 	mu sync.Mutex
 	// cached is the last known-good token, so the hot path skips the store.
 	cached *core.Token
 }
 
-// NewRefreshingSource returns a outbound.TokenSource backed by a stored
-// grant: it serves the cached access token while valid and runs the
-// refresh-token grant when it is not.
+// NewRefreshingSource returns an outbound.TokenSource backed by a stored
+// grant. It serves the cached access token while valid and runs the
+// refresh-token grant once that token expires.
 func NewRefreshingSource(store core.TokenStore, key core.GrantKey, cfg RefreshConfig) core.TokenSource {
 	s := &refreshingSource{store: store, key: key, cfg: cfg}
 	return s.token
@@ -91,7 +91,7 @@ func (s *refreshingSource) token(ctx context.Context) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Re-checking under the lock is what makes this a singleflight: whoever
+	// Re-checking under the lock makes this a singleflight: a caller that
 	// waited behind a refresh finds the fresh token here instead of running a
 	// second one.
 	if s.cached.Valid(s.cfg.now(), margin) {
@@ -117,7 +117,7 @@ func (s *refreshingSource) token(ctx context.Context) (string, error) {
 	if err != nil {
 		var te *TokenError
 		if errors.As(err, &te) && te.InvalidGrant() {
-			// The refresh token is dead; drop it so the next call reports a
+			// The refresh token is dead. Drop it so the next call reports a
 			// clean "not authorized" instead of retrying a rejected grant.
 			_ = s.store.Delete(ctx, s.key)
 			s.cached = nil
@@ -125,7 +125,7 @@ func (s *refreshingSource) token(ctx context.Context) (string, error) {
 		}
 		return "", fmt.Errorf("oauth: refresh grant for %s: %w", s.key.Backend, err)
 	}
-	// Carry forward extras (id_token and friends) the refresh response omitted.
+	// Carry forward extras such as id_token that the refresh response omitted.
 	if fresh.Extra == nil && tok.Extra != nil {
 		fresh.Extra = tok.Extra
 	}

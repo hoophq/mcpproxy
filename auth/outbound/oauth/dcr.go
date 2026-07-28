@@ -18,9 +18,9 @@ import (
 type Client struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret,omitempty"`
-	// RegistrationEndpoint records where this client was registered, so a
-	// cached entry is never reused against a different authorization server
-	// that happens to share an issuer string.
+	// RegistrationEndpoint records where this client was registered, so
+	// EnsureClient does not reuse a cached entry against a different
+	// authorization server that shares an issuer string.
 	RegistrationEndpoint string `json:"registration_endpoint,omitempty"`
 	// AuthMethod is the token_endpoint_auth_method the server accepted.
 	AuthMethod string `json:"token_endpoint_auth_method,omitempty"`
@@ -40,8 +40,8 @@ type registrationRequest struct {
 	Scope                   string   `json:"scope,omitempty"`
 }
 
-// registrationResponse is the RFC 7591 §3.2.1 success body. Only the fields
-// this package acts on are decoded.
+// registrationResponse is the RFC 7591 §3.2.1 success body, decoding only the
+// fields this package acts on.
 type registrationResponse struct {
 	ClientID                string `json:"client_id"`
 	ClientSecret            string `json:"client_secret,omitempty"`
@@ -58,8 +58,9 @@ type RegisterOptions struct {
 	// servers that gate DCR (RFC 7591 §3.1).
 	InitialAccessToken string
 	// Confidential requests a client secret. The default is a public client
-	// (token_endpoint_auth_method=none), which is correct for a loopback
-	// redirect flow: a secret shipped to a local listener is not a secret.
+	// (token_endpoint_auth_method=none), the right choice for a loopback
+	// redirect flow, where a secret shipped to a local listener protects
+	// nothing.
 	Confidential bool
 	HTTPClient   *http.Client
 }
@@ -148,17 +149,17 @@ func RegisterClient(
 
 // ClientStore persists dynamically registered clients keyed by issuer.
 //
-// Re-registering on every restart would leak client records on the
+// Re-registering on every restart leaves orphaned client records on the
 // authorization server and, on servers that show one consent entry per client,
-// spam the user's account page. Persisting the registration keeps one client
-// per (gateway, issuer) pair.
+// fills the user's account page with duplicates. Persisting the registration
+// keeps one client per (gateway, issuer) pair.
 type ClientStore interface {
 	Get(ctx context.Context, issuer string) (*Client, error)
 	Put(ctx context.Context, issuer string, c *Client) error
 }
 
-// ErrClientNotFound is returned by [ClientStore.Get] for an unregistered
-// issuer.
+// ErrClientNotFound reports that no client is registered for an issuer.
+// [ClientStore.Get] returns it.
 var ErrClientNotFound = errors.New("oauth: client not registered")
 
 // MemoryClientStore keeps registrations in memory.
@@ -197,8 +198,8 @@ func (s *MemoryClientStore) Put(_ context.Context, issuer string, c *Client) err
 }
 
 // FileClientStore persists registrations in an AES-256-GCM encrypted file,
-// using the same mechanics as the outbound token store: a client secret is a
-// credential and gets the same protection as a refresh token.
+// reusing the mechanics of the outbound token store. A client secret is a
+// credential and earns the same protection as a refresh token.
 type FileClientStore struct {
 	mu   sync.Mutex
 	file core.EncryptedFile
@@ -267,10 +268,10 @@ func (s *FileClientStore) Put(_ context.Context, issuer string, c *Client) error
 // EnsureClient returns the stored client for issuer, registering one via DCR
 // on first use.
 //
-// A cached client registered against a different endpoint is discarded rather
-// than reused: the issuer string alone does not pin the authorization server,
-// and presenting a client_id to the wrong server produces an opaque
-// invalid_client at token time.
+// EnsureClient drops a cached client registered against a different endpoint
+// instead of reusing it. The issuer string alone does not pin the
+// authorization server, and presenting a client_id to the wrong server yields
+// an opaque invalid_client at token time.
 func EnsureClient(
 	ctx context.Context,
 	store ClientStore,

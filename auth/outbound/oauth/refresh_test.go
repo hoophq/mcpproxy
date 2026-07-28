@@ -16,7 +16,7 @@ import (
 
 // memStore is a minimal in-memory core.TokenStore for these tests. The
 // exported outbound.MemoryStore lives in the parent package, which imports
-// this one, so it cannot be used here.
+// this one, so these tests cannot use it.
 type memStore struct {
 	mu      sync.Mutex
 	grants  map[core.GrantKey]*core.Token
@@ -63,7 +63,7 @@ func TestRefreshingSource_ServesValidTokenWithoutNetwork(t *testing.T) {
 		AccessToken: "still-good", Expiry: now.Add(time.Hour),
 	})
 
-	// A token endpoint that would fail the test if it were ever reached.
+	// A token endpoint that fails the test if any call reaches it.
 	cfg := RefreshConfig{
 		Client: ClientConfig{TokenEndpoint: "http://127.0.0.1:1/never"},
 		Now:    func() time.Time { return now },
@@ -127,8 +127,8 @@ func TestRefreshingSource_RefreshesExpiredAndPersists(t *testing.T) {
 	if stored.AccessToken != "at-new" || stored.RefreshToken != "rt-new" {
 		t.Errorf("stored = %+v, want the refreshed pair persisted", stored)
 	}
-	// Extras the refresh response omitted must survive; the id_token cannot be
-	// re-fetched.
+	// Extras the refresh response omitted have to survive; the id_token cannot
+	// be re-fetched.
 	if stored.Extra["id_token"] != "carried-forward" {
 		t.Errorf("stored extras = %v", stored.Extra)
 	}
@@ -143,8 +143,8 @@ func TestRefreshingSource_RefreshesExpiredAndPersists(t *testing.T) {
 }
 
 func TestRefreshingSource_ExpiryMargin(t *testing.T) {
-	// A token expiring inside the margin would die mid-request; renewal must
-	// happen early.
+	// A token expiring inside the margin would die mid-request, so renewal has
+	// to happen early.
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
@@ -207,7 +207,7 @@ func TestRefreshingSource_NoStoredGrantYieldsErrReauthorize(t *testing.T) {
 }
 
 func TestRefreshingSource_RejectedRefreshTokenIsDropped(t *testing.T) {
-	// A dead refresh token must not be retried on every request; dropping it
+	// A dead refresh token must not be retried on every request. Dropping it
 	// makes the next call report a clean "not authorized".
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -239,8 +239,8 @@ func TestRefreshingSource_RejectedRefreshTokenIsDropped(t *testing.T) {
 }
 
 func TestRefreshingSource_TransientErrorIsNotReauthorize(t *testing.T) {
-	// A 500 is the server's problem, not the grant's; forcing a human through
-	// the login flow over a blip would be wrong.
+	// A 500 is the server's problem, and forcing a human through the login
+	// flow over a blip would be wrong.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		writeJSON(t, w, map[string]string{"error": "server_error"})
@@ -271,8 +271,8 @@ func TestRefreshingSource_TransientErrorIsNotReauthorize(t *testing.T) {
 }
 
 func TestRefreshingSource_ConcurrentCallsRefreshOnce(t *testing.T) {
-	// Servers that rotate refresh tokens invalidate the loser of a parallel
-	// refresh, permanently breaking the grant.
+	// A server that rotates refresh tokens invalidates the loser of a parallel
+	// refresh, breaking the grant for good.
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)

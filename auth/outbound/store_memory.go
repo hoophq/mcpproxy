@@ -6,9 +6,8 @@ import (
 	"sync"
 )
 
-// MemoryStore keeps grants in process memory only. Suitable for tests and for
-// deployments that would rather force a re-authorization on restart than write
-// refresh tokens to disk.
+// MemoryStore keeps grants in process memory. It suits tests and deployments
+// that prefer a re-authorization on restart over refresh tokens on disk.
 type MemoryStore struct {
 	mu     sync.RWMutex
 	grants map[GrantKey]*Token
@@ -42,8 +41,8 @@ func (s *MemoryStore) Put(_ context.Context, k GrantKey, t *Token) error {
 	return nil
 }
 
-// Delete implements [TokenStore]. Deleting an absent key is not an error:
-// callers delete to guarantee absence, and they got what they asked for.
+// Delete implements [TokenStore]. Deleting an absent key succeeds: the caller
+// wanted the key gone, and it is gone.
 func (s *MemoryStore) Delete(_ context.Context, k GrantKey) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

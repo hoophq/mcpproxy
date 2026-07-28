@@ -4,8 +4,8 @@
 // It exists only to keep the dependency graph acyclic: outbound.Resolve builds
 // OAuth sources so outbound imports oauth, while oauth needs the Token and
 // TokenStore vocabulary. Parking that vocabulary here lets both import it.
-// Every name is re-exported as an alias from auth/outbound, which is the only
-// package callers should reference.
+// auth/outbound re-exports every name as an alias, and callers should
+// reference that package rather than this one.
 package core
 
 import (
@@ -27,9 +27,9 @@ type GrantKey struct {
 
 // Token is a persisted OAuth grant.
 //
-// Expiry is absolute rather than the lifetime seconds the wire format uses,
-// because a stored token is read back long after it was issued and a relative
-// duration would be meaningless by then.
+// Expiry is absolute rather than the lifetime seconds the wire format uses.
+// The gateway reads a stored token back long after the provider issued it, and
+// a relative duration would be meaningless by then.
 type Token struct {
 	AccessToken  string            `json:"access_token"`
 	RefreshToken string            `json:"refresh_token,omitempty"`
@@ -38,12 +38,12 @@ type Token struct {
 	Extra        map[string]string `json:"extra,omitempty"`
 }
 
-// Valid reports whether the access token is present and will still be accepted
-// at now+margin.
+// Valid reports whether the access token is present and still unexpired at
+// now+margin.
 //
 // A zero Expiry means the token never expires: providers that omit expires_in
-// are promising exactly that, and treating the zero time as "already expired"
-// would send every such token straight to a pointless refresh.
+// promise that, and treating the zero time as already expired would send every
+// such token to a pointless refresh.
 func (t *Token) Valid(now time.Time, margin time.Duration) bool {
 	if t == nil || t.AccessToken == "" {
 		return false
@@ -70,16 +70,16 @@ func (t *Token) Clone() *Token {
 	return &c
 }
 
-// ErrNotFound is returned by TokenStore.Get when no grant is stored for the
-// key. It is an expected condition — the signal to start an authorization
-// flow — not a failure.
+// ErrNotFound reports that no grant is stored for the key. TokenStore.Get
+// returns it to signal that a caller should start an authorization flow, not
+// that storage broke.
 var ErrNotFound = errors.New("outbound: token not found")
 
 // TokenStore persists grants across gateway restarts.
 //
 // Get MUST return an error wrapping [ErrNotFound] when the key is absent, so
-// callers can distinguish "never authorized" from "storage is broken" and only
-// trigger a flow for the former.
+// callers can distinguish "never authorized" from "storage is broken" and
+// trigger a flow only for the former.
 type TokenStore interface {
 	Get(ctx context.Context, k GrantKey) (*Token, error)
 	Put(ctx context.Context, k GrantKey, t *Token) error

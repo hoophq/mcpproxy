@@ -26,32 +26,33 @@ type ClientConfig struct {
 	AuthEndpoint  string
 	TokenEndpoint string
 	Scopes        []string
-	// Audience, when set, is sent as the RFC 8707 resource indicator so the
-	// authorization server mints a token scoped to this MCP server rather than
-	// one valid everywhere.
+	// Audience, when set, goes out as the RFC 8707 resource indicator so the
+	// authorization server mints a token scoped to this MCP server rather
+	// than one valid everywhere.
 	Audience   string
 	HTTPClient *http.Client
 }
 
-// AuthorizeRequest is what an [Authorizer] must get in front of the user.
+// AuthorizeRequest carries the authorization URL an [Authorizer] must get in
+// front of the user.
 type AuthorizeRequest struct {
 	// URL is the fully built authorization URL.
 	URL string
 	// State is the CSRF value embedded in URL; the authorizer must reject a
 	// callback carrying anything else.
 	State string
-	// RedirectURI is the redirect the URL was built with.
+	// RedirectURI is the redirect that URL declares.
 	RedirectURI string
 }
 
 // Authorizer obtains an authorization code for a built authorization URL.
 //
-// This is the seam between the protocol (which is fixed) and how a deployment
-// actually gets a human to a browser: a CLI opens a loopback listener, a hosted
-// gateway hands the URL to its own UI and waits for the callback it already
-// owns. Returning the redirect URI along with the code lets an authorizer pick
-// its own (e.g. an ephemeral loopback port) while the caller still sends the
-// matching value on the token request, as RFC 6749 §4.1.3 requires.
+// The interface separates the fixed protocol from how a deployment gets a
+// human to a browser. A CLI opens a loopback listener; a hosted gateway hands
+// the URL to its own UI and waits for the callback it already owns. Returning
+// the redirect URI alongside the code lets an authorizer pick its own (an
+// ephemeral loopback port, say) while the caller still sends the matching
+// value on the token request, as RFC 6749 §4.1.3 requires.
 type Authorizer interface {
 	Authorize(ctx context.Context, req AuthorizeRequest) (code string, redirectURI string, err error)
 }
@@ -64,10 +65,10 @@ func (f AuthorizerFunc) Authorize(ctx context.Context, req AuthorizeRequest) (st
 	return f(ctx, req)
 }
 
-// RedirectURIProvider is an optional [Authorizer] extension: an authorizer that
-// must be reached at a specific URL (a loopback listener on an ephemeral port)
-// declares it before the authorization URL is built, so the URL carries the
-// right redirect_uri.
+// RedirectURIProvider is an optional [Authorizer] extension. An authorizer
+// reachable only at a specific URL, such as a loopback listener on an
+// ephemeral port, declares that URL before [BuildAuthorizeURL] runs, so the
+// authorization URL carries the right redirect_uri.
 type RedirectURIProvider interface {
 	RedirectURI(ctx context.Context) (string, error)
 }
@@ -168,8 +169,8 @@ func Authorize(ctx context.Context, cfg ClientConfig, az Authorizer) (*core.Toke
 	return ExchangeCode(ctx, cfg, code, redirectURI, p.Verifier)
 }
 
-// tokenResponse is the RFC 6749 §5.1 token endpoint body. Extra fields are
-// captured separately so provider-specific values (notably id_token) survive.
+// tokenResponse is the RFC 6749 §5.1 token endpoint body. decodeToken keeps
+// the remaining fields separately so provider extras such as id_token survive.
 type tokenResponse struct {
 	AccessToken      string `json:"access_token"`
 	TokenType        string `json:"token_type"`
@@ -180,8 +181,8 @@ type tokenResponse struct {
 	ErrorDescription string `json:"error_description"`
 }
 
-// standardTokenFields are lifted into outbound.Token proper; anything else in
-// the response lands in Token.Extra.
+// standardTokenFields names the response keys that map onto outbound.Token
+// fields; anything else in the response lands in Token.Extra.
 var standardTokenFields = map[string]bool{
 	"access_token": true, "token_type": true, "expires_in": true,
 	"refresh_token": true, "error": true, "error_description": true,
@@ -312,8 +313,8 @@ func decodeToken(raw []byte, status int) (*core.Token, error) {
 	return tok, nil
 }
 
-// jsonScalar renders a JSON value as a string when it is a scalar, so Extra
-// stays a flat map instead of carrying nested provider payloads nobody reads.
+// jsonScalar renders a JSON value as a string when it is a scalar, keeping
+// Extra a flat map instead of a home for nested provider payloads.
 func jsonScalar(v json.RawMessage) (string, bool) {
 	var s string
 	if err := json.Unmarshal(v, &s); err == nil {
@@ -344,9 +345,9 @@ func (e *TokenError) Error() string {
 	return fmt.Sprintf("oauth: token endpoint returned %s", e.Code)
 }
 
-// InvalidGrant reports whether the server rejected the grant itself — an
-// expired or revoked refresh token — which means re-authorization rather than
-// retry.
+// InvalidGrant reports whether the server rejected the grant itself, an
+// expired or revoked refresh token. The caller must re-authorize instead of
+// retrying.
 func (e *TokenError) InvalidGrant() bool {
 	return e.Code == "invalid_grant"
 }
@@ -354,15 +355,15 @@ func (e *TokenError) InvalidGrant() bool {
 // LoopbackAuthorizer completes the flow through a loopback HTTP listener, per
 // RFC 8252 §7.3 (native app redirection).
 //
-// The listener binds 127.0.0.1:0 and is opened by [LoopbackAuthorizer.RedirectURI]
-// before the authorization URL is built, so the URL carries the real port. The
-// zero value is usable; Logger defaults to slog.Default().
+// [LoopbackAuthorizer.RedirectURI] binds 127.0.0.1:0 before [BuildAuthorizeURL]
+// runs, so the authorization URL carries the real port. The zero value is
+// usable; Logger defaults to slog.Default().
 type LoopbackAuthorizer struct {
 	// Prompt receives the authorization URL. Default: log it at info level.
 	Prompt func(url string)
 	// Timeout bounds the wait for the user to finish. Default 3 minutes.
 	Timeout time.Duration
-	// Logger is used for the default prompt and for callback diagnostics.
+	// Logger backs the default prompt and callback diagnostics.
 	Logger *slog.Logger
 
 	ln   net.Listener
@@ -405,8 +406,8 @@ func (a *LoopbackAuthorizer) Authorize(ctx context.Context, req AuthorizeRequest
 		timeout = 3 * time.Minute
 	}
 
-	// Buffered: the handler must never block if the wait below has already
-	// given up on a timeout.
+	// Buffered so the handler does not block once the wait below has timed
+	// out.
 	resultCh := make(chan callbackResult, 1)
 
 	srv := &http.Server{
@@ -469,9 +470,9 @@ func (a *LoopbackAuthorizer) handleCallback(wantState string, resultCh chan<- ca
 			deliver(callbackResult{err: &TokenError{Code: errCode, Description: desc, Status: http.StatusBadRequest}})
 			return
 		}
-		// State check before the code is read: an attacker-supplied callback
-		// would otherwise inject their own authorization code into our session
-		// (RFC 6749 §10.12).
+		// Check state before reading the code: an attacker-supplied callback
+		// would otherwise inject their own authorization code into this
+		// session (RFC 6749 §10.12).
 		if got := q.Get("state"); got != wantState {
 			http.Error(w, "state mismatch", http.StatusBadRequest)
 			deliver(callbackResult{err: errors.New("oauth: callback state mismatch")})

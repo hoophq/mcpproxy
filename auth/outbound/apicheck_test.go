@@ -8,8 +8,8 @@ import (
 	"github.com/hoophq/mcpproxy/config"
 )
 
-// TestDaemonAPISurface pins the exact call shapes cmd/mcpproxyd depends on, so
-// a signature change here fails in this package rather than in the daemon.
+// TestDaemonAPISurface pins the call shapes cmd/mcpproxyd depends on, so a
+// signature change here fails in this package rather than in the daemon.
 func TestDaemonAPISurface(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewFileStore(dir+"/tokens.enc", dir+"/tokens.key")

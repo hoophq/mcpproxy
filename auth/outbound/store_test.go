@@ -32,7 +32,7 @@ func TestMemoryStore_RoundTrip(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 
-	// Grants are keyed by user: alice's token must not answer for bob.
+	// Grants are keyed by user, so alice's token must not answer for bob.
 	if _, err := s.Get(ctx, GrantKey{Backend: "github", User: "bob"}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("bob's Get = %v, want ErrNotFound", err)
 	}
@@ -43,7 +43,7 @@ func TestMemoryStore_RoundTrip(t *testing.T) {
 	if _, err := s.Get(ctx, k); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get after Delete = %v, want ErrNotFound", err)
 	}
-	// Deleting an absent key is not an error: the caller got what they asked for.
+	// Deleting an absent key succeeds: the caller wanted the key gone.
 	if err := s.Delete(ctx, k); err != nil {
 		t.Errorf("second Delete: %v", err)
 	}
@@ -122,8 +122,8 @@ func TestFileStore_WrongKeyFails(t *testing.T) {
 		t.Fatalf("Put: %v", err)
 	}
 
-	// A second keyfile is a different random key; GCM must refuse the blob
-	// rather than hand back garbage.
+	// A second keyfile holds a different random key, and GCM must refuse the
+	// blob rather than hand back garbage.
 	_, err = NewFileStore(path, filepath.Join(dir, "b.key"))
 	if err == nil {
 		t.Fatal("expected opening the store with the wrong key to fail")
@@ -131,8 +131,8 @@ func TestFileStore_WrongKeyFails(t *testing.T) {
 }
 
 func TestFileStore_TokensAreNotOnDiskInPlaintext(t *testing.T) {
-	// The whole point of the file store: a refresh token is a long-lived
-	// credential and must not be readable by anyone who gets the file.
+	// A refresh token is a long-lived credential, and anyone who gets the file
+	// must not be able to read it.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tokens.enc")
 	s, err := NewFileStore(path, filepath.Join(dir, "tokens.key"))
@@ -210,7 +210,7 @@ func TestFileStore_DeleteIsPersisted(t *testing.T) {
 }
 
 func TestFileStore_EmptyStoreIsNotAnError(t *testing.T) {
-	// "No store file yet" is the first-run state, not a failure.
+	// A missing store file is the first-run state and must open cleanly.
 	dir := t.TempDir()
 	s, err := NewFileStore(filepath.Join(dir, "nope.enc"), filepath.Join(dir, "nope.key"))
 	if err != nil {
@@ -237,7 +237,7 @@ func TestLoadOrCreateKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	// Key material must never be world- or group-readable.
+	// Key material must stay unreadable to group and world.
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("keyfile mode = %o, want 600", perm)
 	}
@@ -252,7 +252,7 @@ func TestLoadOrCreateKey(t *testing.T) {
 }
 
 func TestLoadOrCreateKey_RejectsWrongLength(t *testing.T) {
-	// Silently stretching or truncating operator key material would hide a
+	// Stretching or truncating operator key material would hide a
 	// misconfiguration behind working encryption.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "short.key")
@@ -278,7 +278,7 @@ func TestTokenValid(t *testing.T) {
 	}{
 		{"nil", nil, 0, false},
 		{"no access token", &Token{Expiry: now.Add(time.Hour)}, 0, false},
-		// A provider that omits expires_in is promising a token that does not
+		// A provider that omits expires_in promises a token that does not
 		// expire; treating that as expired would force pointless refreshes.
 		{"zero expiry never expires", &Token{AccessToken: "at"}, time.Hour, true},
 		{"valid", &Token{AccessToken: "at", Expiry: now.Add(time.Hour)}, 0, true},

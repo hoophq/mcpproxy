@@ -29,11 +29,11 @@ type ExchangeConfig struct {
 	ClientID      string
 	ClientSecret  string
 
-	// SubjectToken yields the inbound token to exchange, typically the
-	// caller's own access token as validated by inbound auth.
+	// SubjectToken yields the inbound token to exchange, usually the caller's
+	// own access token as validated by inbound auth.
 	SubjectToken func(ctx context.Context) (string, error)
 
-	// Audience is the RFC 8693 "audience" parameter: which upstream the
+	// Audience is the RFC 8693 "audience" parameter naming the upstream the
 	// returned token should be valid for.
 	Audience string
 	// Scopes narrows the returned token.
@@ -56,19 +56,19 @@ type exchangeSource struct {
 	client ClientConfig
 
 	mu sync.Mutex
-	// subjectHash pins the cache to the identity it was minted for. Two users
-	// hitting the same backend must never share an exchanged token, and a
-	// re-login (new subject token) must invalidate the old one.
+	// subjectHash pins the cache to the identity the token was minted for.
+	// Two users hitting the same backend must never share an exchanged token,
+	// and a re-login (new subject token) invalidates the old one.
 	subjectHash string
 	cached      *core.Token
 }
 
-// NewExchangeSource returns a outbound.TokenSource that exchanges the inbound
+// NewExchangeSource returns an outbound.TokenSource that exchanges the inbound
 // subject token for an upstream token (RFC 8693).
 //
-// This is the alternative to running an authorization flow per backend: the
-// caller already authenticated to the gateway, and the authorization server is
-// willing to mint a downstream-scoped token from that proof.
+// Exchange replaces a per-backend authorization flow. The caller already
+// authenticated to the gateway, and the authorization server mints a
+// downstream-scoped token from that proof.
 func NewExchangeSource(cfg ExchangeConfig) core.TokenSource {
 	s := &exchangeSource{
 		cfg: cfg,
@@ -140,8 +140,8 @@ func (s *exchangeSource) token(ctx context.Context) (string, error) {
 	return tok.AccessToken, nil
 }
 
-// hashToken derives a cache key from a bearer token. The token itself is never
-// stored as a map key so a heap dump or a logged key does not leak credentials.
+// hashToken derives a cache key from a bearer token. The map key never holds
+// the token itself, so a heap dump or a logged key leaks no credentials.
 func hashToken(tok string) string {
 	sum := sha256.Sum256([]byte(tok))
 	return base64.RawURLEncoding.EncodeToString(sum[:])

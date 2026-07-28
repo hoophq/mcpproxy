@@ -17,11 +17,11 @@ const KeySize = 32
 // LoadOrCreateKey reads a 32-byte raw AES key from path, generating one with
 // crypto/rand and writing it 0600 if the file does not exist.
 //
-// The key lives in its own file rather than inside the store so an operator can
-// keep it on a different volume (or a tmpfs, or a secret mount) from the
-// ciphertext. A short or long file is rejected outright: silently stretching or
-// truncating operator key material would hide a misconfiguration behind
-// working encryption.
+// The key lives in its own file rather than inside the store so an operator
+// can keep it on a different volume from the ciphertext, a tmpfs or a secret
+// mount. A short or long file is rejected outright: stretching or truncating
+// operator key material would hide a misconfiguration behind working
+// encryption.
 func LoadOrCreateKey(path string) ([]byte, error) {
 	key, err := os.ReadFile(path)
 	switch {
@@ -43,8 +43,8 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("outbound: generate key: %w", err)
 	}
-	// O_EXCL so a concurrent creator loses rather than silently overwriting a
-	// key that some other process already encrypted data with.
+	// O_EXCL so a concurrent creator loses rather than overwriting a key some
+	// other process already encrypted data with.
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
@@ -64,9 +64,9 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 
 // EncryptedFile is a single AES-256-GCM sealed JSON document on disk.
 //
-// The whole document is one blob rather than a record per key: these stores
-// hold a handful of grants, and a single seal keeps the format trivially atomic
-// (rename) with no partial-write recovery logic to get wrong.
+// The whole document is one blob rather than a record per key. These stores
+// hold a handful of grants, and a single seal keeps the format atomic through
+// rename, with no partial-write recovery logic to get wrong.
 type EncryptedFile struct {
 	Path string
 	Key  []byte
@@ -96,8 +96,9 @@ func (e EncryptedFile) ReadJSON(v any) error {
 	}
 	plain, err := gcm.Open(nil, blob[:ns], blob[ns:], nil)
 	if err != nil {
-		// GCM authentication covers both a wrong key and tampering; we cannot
-		// tell them apart, and the operator response is the same either way.
+		// GCM authentication covers both a wrong key and tampering. The
+		// gateway cannot tell them apart, and the operator response is the
+		// same either way.
 		return fmt.Errorf("outbound: decrypt %s (wrong key or corrupt file): %w", e.Path, err)
 	}
 	if err := json.Unmarshal(plain, v); err != nil {

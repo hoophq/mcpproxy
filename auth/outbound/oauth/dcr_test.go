@@ -151,7 +151,7 @@ func TestEnsureClient_RegistersOnceThenReusesStore(t *testing.T) {
 }
 
 func TestEnsureClient_ReregistersWhenEndpointChanged(t *testing.T) {
-	// The issuer string alone does not pin the authorization server; a cached
+	// The issuer string alone does not pin the authorization server. A cached
 	// client_id presented to a different one fails opaquely at token time.
 	newSrv := func(id string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

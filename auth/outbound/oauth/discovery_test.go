@@ -46,7 +46,7 @@ func TestParseWWWAuthenticate(t *testing.T) {
 			wantMeta:   "https://r.example.com/.well-known/oauth-protected-resource",
 		},
 		{
-			// Quoted values legitimately contain commas; a comma-split parser
+			// Quoted values contain commas of their own; a comma-split parser
 			// truncates them.
 			name:        "quoted value containing commas",
 			header:      `Bearer error="invalid_token", error_description="expired, please re-authenticate", scope="a b c"`,
@@ -129,8 +129,8 @@ func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 }
 
 func TestFetchResourceMetadata_PathSpecificPreferred(t *testing.T) {
-	// A host serving several MCP endpoints publishes per-endpoint metadata;
-	// the root document describes something else and must not win.
+	// A host serving several MCP endpoints publishes per-endpoint metadata.
+	// The root document describes something else and must not win.
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
@@ -182,7 +182,7 @@ func TestFetchResourceMetadata_FallsBackToRoot(t *testing.T) {
 
 func TestFetchResourceMetadata_AcceptsExplicitWellKnownURL(t *testing.T) {
 	// The URL from a WWW-Authenticate resource_metadata param already points at
-	// the document; it must be fetched verbatim, not re-derived.
+	// the document, so the fetch must use it verbatim rather than re-derive it.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != WellKnownResourcePath+"/deep/path" {
 			t.Errorf("unexpected fetch of %q", r.URL.Path)
@@ -315,7 +315,7 @@ func TestFetchASMetadata_TrustsDocumentIssuerOnMismatch(t *testing.T) {
 }
 
 func TestFetchASMetadata_RejectsDocumentWithoutTokenEndpoint(t *testing.T) {
-	// A document with no token_endpoint is unusable; falling through to the
+	// A document with no token_endpoint is unusable. Falling through to the
 	// next candidate beats returning a half-built config.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == WellKnownASPath {
@@ -375,8 +375,8 @@ func TestSupportsS256(t *testing.T) {
 	}{
 		{"advertises S256", []string{"plain", "S256"}, true},
 		{"plain only", []string{"plain"}, false},
-		// No advertisement predates RFC 8414's capability fields; sending a
-		// challenge to a server that ignores PKCE is harmless.
+		// No advertisement predates RFC 8414's capability fields, and sending
+		// a challenge to a server that ignores PKCE costs nothing.
 		{"no advertisement", nil, true},
 	}
 	for _, tt := range tests {

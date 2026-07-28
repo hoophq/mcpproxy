@@ -17,7 +17,7 @@ import (
 
 // fakeProvider serves protected-resource metadata, AS metadata, dynamic client
 // registration, and a token endpoint from one httptest server, so a resolver
-// test exercises discovery→DCR→token in the same shape production sees.
+// test exercises discovery→DCR→token in the shape production sees.
 type fakeProvider struct {
 	*httptest.Server
 
@@ -98,7 +98,7 @@ func (p *fakeProvider) writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 	}
 }
 
-// redirectFollower plays the browser: it fetches the authorize URL and reads
+// redirectFollower plays the browser. It fetches the authorize URL and reads
 // the code out of the redirect.
 type redirectFollower struct {
 	client *http.Client
@@ -147,8 +147,8 @@ func TestResolve_NoneAndEmpty(t *testing.T) {
 }
 
 func TestResolve_StdioIgnoresAuthMode(t *testing.T) {
-	// A subprocess has no HTTP request to carry a credential on; its auth is
-	// the process environment.
+	// A subprocess has no HTTP request to carry a credential on, and the
+	// process environment supplies its auth.
 	src, err := Resolve(context.Background(), "b",
 		config.Backend{Transport: "stdio", Command: []string{"echo"}, Auth: "oauth"}, Deps{})
 	if err != nil {
@@ -230,7 +230,7 @@ func TestResolve_OAuthDiscoveryDCRAndFlow(t *testing.T) {
 		t.Errorf("authorizer ran %d times, want 1", az.calls.Load())
 	}
 
-	// The grant is persisted, so a later request is served without another
+	// The grant is persisted, so a later request is served without a second
 	// browser round trip.
 	stored, err := store.Get(context.Background(), GrantKey{Backend: "github"})
 	if err != nil {
@@ -297,7 +297,7 @@ func TestResolve_OAuthWithoutRegistrationEndpointOrClientID(t *testing.T) {
 
 func TestResolve_OAuthRefusesWithoutS256(t *testing.T) {
 	// Registering a public client without PKCE would be a downgrade the
-	// operator never asked for.
+	// operator did not ask for.
 	p := newFakeProvider(t)
 	p.challengeMethods = []string{"plain"}
 
@@ -325,8 +325,8 @@ func TestResolve_OAuthPerUserKeysGrantsByUser(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 
-	// No authenticated user means we cannot tell whose grant to use; falling
-	// back to a shared one would hand alice bob's upstream access.
+	// Without an authenticated user the resolver cannot tell whose grant to
+	// use, and a shared fallback would hand alice bob's upstream access.
 	if _, err := src(context.Background()); err == nil {
 		t.Fatal("expected a per_user backend to refuse an unauthenticated request")
 	}
@@ -368,7 +368,8 @@ func TestResolve_OAuthTokenExchange(t *testing.T) {
 	}
 
 	// Exchange derives the upstream credential from the caller's own token, so
-	// a request without one must fail rather than fall back to a shared grant.
+	// a request without one must fail instead of falling back to a shared
+	// grant.
 	if _, err := src(context.Background()); err == nil {
 		t.Fatal("expected exchange to fail without an inbound token")
 	}
@@ -414,8 +415,8 @@ func TestResolve_OAuthTokenExchangeUsesDepsInboundToken(t *testing.T) {
 }
 
 func TestResolve_UpstreamSwapWins(t *testing.T) {
-	// The embedded auth server already federated the user; running our own
-	// flow on top would prompt the same person twice.
+	// The embedded auth server already federated the user; a second flow on
+	// top would prompt the same person twice.
 	p := newFakeProvider(t)
 	az := &redirectFollower{client: p.Client()}
 
@@ -443,8 +444,8 @@ func TestResolve_UpstreamSwapWins(t *testing.T) {
 }
 
 func TestResolve_OAuthWithoutAuthorizerReportsReauthorize(t *testing.T) {
-	// No authorizer means nobody can complete the flow; the caller needs to
-	// hear that rather than wait on a browser that will never open.
+	// With no authorizer nobody can complete the flow, and the caller needs to
+	// hear that rather than wait on a browser nobody will open.
 	p := newFakeProvider(t)
 	src, err := Resolve(context.Background(), "github", config.Backend{
 		Transport: "streamable-http", URL: p.URL + "/mcp", Auth: "oauth",
