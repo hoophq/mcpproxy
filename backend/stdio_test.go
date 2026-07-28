@@ -15,9 +15,9 @@ import (
 	"github.com/hoophq/mcpproxy/mcp"
 )
 
-// The tests here exercise the exact framing code StdioBackend runs — against
-// a real testmcp server over in-process pipes, so no subprocess is involved.
-// Spawn behaviour lives in stdio_exec_unix_test.go.
+// These tests exercise the framing code StdioBackend runs, driving a real
+// testmcp server over in-process pipes with no subprocess involved. Spawn
+// behaviour lives in stdio_exec_unix_test.go.
 
 // pipeServer wires a lineConn to an in-process testmcp over two io.Pipes.
 func pipeServer(t *testing.T) (*lineConn, *testmcp.Server) {
@@ -66,8 +66,8 @@ func TestStdioFramingRoundTrip(t *testing.T) {
 		t.Errorf("protocolVersion = %q", res.ProtocolVersion)
 	}
 
-	// An envelope arriving with its own CRLF must not double-frame: a blank
-	// line between messages desynchronizes a strict peer.
+	// An envelope arriving with its own CRLF must not double-frame. A
+	// blank line between messages desynchronizes a strict peer.
 	if err := c.send([]byte("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\r\n")); err != nil {
 		t.Fatalf("send tools/list: %v", err)
 	}
@@ -77,8 +77,8 @@ func TestStdioFramingRoundTrip(t *testing.T) {
 	}
 }
 
-// TestStdioFramingLargeMessage defends the raised scanner limit: 512 KB is
-// well past bufio's 64 KiB default and a routine size for tool output.
+// TestStdioFramingLargeMessage defends the raised scanner limit. 512 KB sits
+// past bufio's 64 KiB default and is a routine size for tool output.
 func TestStdioFramingLargeMessage(t *testing.T) {
 	c, _ := pipeServer(t)
 	if err := c.send([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"big","arguments":{"kb":512}}}`)); err != nil {
@@ -167,8 +167,8 @@ func TestMergeEnvLayersOverParent(t *testing.T) {
 	if len(got) != 3 || got[0] != "A=1" || got[1] != "B=2" || got[2] != "B=override" {
 		t.Fatalf("mergeEnv = %v, want the override appended after the parent entries", got)
 	}
-	// The parent slice must not be mutated: it is os.Environ()'s result,
-	// shared across every backend the factory builds.
+	// mergeEnv must not mutate the parent slice. It holds os.Environ()'s
+	// result, shared across every backend the factory builds.
 	if len(base) != 2 {
 		t.Errorf("base was mutated: %v", base)
 	}
@@ -201,7 +201,7 @@ type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
 
-// shortWriter accepts every write but reports one byte fewer, standing in for
+// shortWriter accepts each write but reports one byte fewer, standing in for
 // a pipe that fills mid-message.
 type shortWriter struct{}
 

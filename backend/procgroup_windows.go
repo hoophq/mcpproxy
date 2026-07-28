@@ -8,8 +8,8 @@ import (
 )
 
 // Windows has no signals, so both escalation steps terminate the process. A
-// job object would be the equivalent of a process group, but stdio backends
-// on Windows are a niche case; we settle for killing the direct child.
+// job object is the closest equivalent to a process group, but stdio backends
+// on Windows are rare enough that killing the direct child suffices.
 var (
 	sigTerm os.Signal = os.Kill
 	sigKill os.Signal = os.Kill

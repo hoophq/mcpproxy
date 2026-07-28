@@ -20,16 +20,16 @@ const defaultShutdownGrace = 3 * time.Second
 const politeGrace = 250 * time.Millisecond
 
 // StdioBackend runs an MCP server as a child process and speaks
-// newline-delimited JSON-RPC over its stdin/stdout. The child's stderr is
-// logged at debug level: MCP servers habitually use it for human-readable
-// diagnostics that are not protocol traffic.
+// newline-delimited JSON-RPC over its stdin/stdout. It logs the child's
+// stderr at debug level, since MCP servers use that stream for human-readable
+// diagnostics rather than protocol traffic.
 //
-// The child is placed in its own process group so Close reaps the whole tree.
-// That matters because the common launcher (`npx some-mcp-server`) forks a
-// node grandchild which would otherwise survive and keep holding the pipes.
+// Start puts the child in its own process group so Close reaps the whole
+// tree. The common launcher (`npx some-mcp-server`) forks a node grandchild
+// that would otherwise survive and keep holding the pipes.
 type StdioBackend struct {
-	// ShutdownGrace bounds each step of Close's escalation (stdin EOF →
-	// SIGTERM → SIGKILL). Zero means defaultShutdownGrace.
+	// ShutdownGrace bounds each step of Close's escalation (stdin EOF,
+	// SIGTERM, then SIGKILL). Zero means defaultShutdownGrace.
 	ShutdownGrace time.Duration
 
 	name string
@@ -92,10 +92,10 @@ func (b *StdioBackend) Start(ctx context.Context) error {
 	cmd.Cancel = func() error { return signalGroup(cmd, sigTerm) }
 
 	// Own the pipes as plain os.Files rather than using cmd.StdoutPipe:
-	// exec's Wait refuses to return until those pipes hit EOF, which
-	// deadlocks whenever a grandchild inherits stdout and outlives the
-	// child. With our own files we can Wait first, then unblock the
-	// readers by closing the read ends ourselves.
+	// exec's Wait holds until those pipes hit EOF, which deadlocks whenever
+	// a grandchild inherits stdout and outlives the child. With our own
+	// files, reap can Wait first and then unblock the readers by closing
+	// the read ends itself.
 	stdinR, stdinW, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("stdio backend %s: stdin pipe: %w", b.name, err)
@@ -137,7 +137,7 @@ func (b *StdioBackend) Start(ctx context.Context) error {
 }
 
 // reap waits for the child, releases the readers, then closes Recv and Done
-// in that order so no send can race the close.
+// in that order so no send races the close.
 func (b *StdioBackend) reap(cmd *exec.Cmd, readers *sync.WaitGroup) {
 	waitErr := cmd.Wait()
 	// The child is gone; any grandchild still holding the write ends is no
@@ -146,8 +146,8 @@ func (b *StdioBackend) reap(cmd *exec.Cmd, readers *sync.WaitGroup) {
 	readers.Wait()
 	close(b.conn.recv)
 	b.mu.Lock()
-	// A nonzero status during Close is our own SIGTERM/SIGKILL, not a
-	// fault worth reporting.
+	// A nonzero status during Close comes from our own SIGTERM or
+	// SIGKILL, so it is not a fault worth reporting.
 	if !b.closing && waitErr != nil {
 		b.err = fmt.Errorf("stdio backend %s exited: %w", b.name, waitErr)
 	}
@@ -181,11 +181,11 @@ func (b *StdioBackend) Err() error {
 	return b.err
 }
 
-// Close shuts the child down by escalating: EOF on stdin (the polite exit
-// signal for stdio MCP servers), then SIGTERM to the process group, then
-// SIGKILL. Signals target the group rather than the pid, so an `npx`
-// launcher's node grandchild dies with it. Close blocks until the child is
-// reaped and is safe to call repeatedly.
+// Close escalates until the child is gone: EOF on stdin (the polite exit
+// signal for stdio MCP servers), SIGTERM to the process group, then SIGKILL.
+// Signals target the group rather than the pid, so an `npx` launcher's node
+// grandchild dies with it. Close blocks until reap finishes and tolerates
+// repeated calls.
 func (b *StdioBackend) Close() error {
 	b.closeOnce.Do(func() { b.closeErr = b.shutdown() })
 	return b.closeErr
@@ -214,8 +214,8 @@ func (b *StdioBackend) shutdown() error {
 	}
 
 	b.conn.closeWrite()
-	// A server that honours stdin EOF exits at once; don't burn the full
-	// grace here before escalating.
+	// A server that honours stdin EOF exits at once, so cap this step
+	// well short of the full grace before escalating.
 	if b.waitExit(min(grace, politeGrace)) {
 		return nil
 	}
@@ -245,8 +245,8 @@ func (b *StdioBackend) waitExit(d time.Duration) bool {
 	}
 }
 
-// mergeEnv layers overrides onto base ("KEY=VALUE" entries). Later entries
-// win in exec, so appending is enough.
+// mergeEnv layers overrides onto base ("KEY=VALUE" entries). exec resolves
+// duplicates to the last entry, so appending is enough.
 func mergeEnv(base []string, overrides map[string]string) []string {
 	if len(overrides) == 0 {
 		return base

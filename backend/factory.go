@@ -22,14 +22,14 @@ const (
 // from cfg.
 //
 // ts, when non-nil, mints the outbound bearer token for each request to a
-// remote backend — the seam where static/passthrough/OAuth outbound auth
-// plugs in. It is ignored for stdio backends, which inherit credentials
-// through their environment instead.
+// remote backend. Static, passthrough and OAuth outbound auth all plug in
+// here. Stdio backends ignore it and inherit credentials through their
+// environment instead.
 //
 // Configuration errors (unknown transport, missing command/url) surface from
 // the returned Factory rather than from NewFactory, so a misconfigured
-// backend fails its own session instead of the whole daemon's wiring. The
-// same conditions are already rejected by config.Validate.
+// backend fails its own session instead of the whole daemon's wiring.
+// config.Validate already rejects the same conditions.
 func NewFactory(name string, cfg config.Backend, ts func(ctx context.Context) (string, error)) Factory {
 	return func(_ context.Context) (Backend, error) {
 		switch cfg.Transport {

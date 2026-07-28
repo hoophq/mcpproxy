@@ -1,8 +1,8 @@
 package gateway_test
 
-// End-to-end gateway tests over an in-process testmcp backend: they exercise
-// the full path clients use (HTTP front → pipeline → backend → response),
-// which also covers jsonrpc and session as a side effect.
+// End-to-end gateway tests over an in-process testmcp backend. They drive
+// the full path a client takes (HTTP front → pipeline → backend → response),
+// which covers jsonrpc and session along the way.
 
 import (
 	"bytes"
@@ -100,7 +100,7 @@ func (c *tclient) initialize() {
 	}
 	c.post(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 	// Populate the session catalog so unadvertised-tool enforcement has a
-	// baseline (mirrors real client behavior).
+	// baseline, matching what a real client does.
 	c.post(`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
 }
 

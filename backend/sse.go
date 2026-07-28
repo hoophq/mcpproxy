@@ -17,8 +17,8 @@ import (
 )
 
 // SSEBackend speaks the legacy MCP HTTP+SSE transport (protocol revision
-// 2024-11-05), still used by several hosted servers (Atlassian, Monday,
-// Square, Replicate, …):
+// 2024-11-05), which several hosted servers still require (Atlassian,
+// Monday, Square, Replicate, …):
 //
 //	GET  <url>            → long-lived text/event-stream
 //	  event: endpoint     → data carries the URL to POST messages to
@@ -26,9 +26,9 @@ import (
 //	POST <endpoint URL>   → one JSON-RPC message; responses arrive on the
 //	                        GET stream, not in the POST body (usually 202)
 //
-// The newer streamable-HTTP transport (RemoteBackend) replaced this design;
-// keep new integrations there and use SSEBackend only when the remote
-// offers nothing else.
+// The newer streamable-HTTP transport (RemoteBackend) replaced this design.
+// Point new integrations there and reach for SSEBackend only when the
+// remote offers nothing else.
 type SSEBackend struct {
 	// TokenSource, when non-nil, mints the outbound bearer token for each
 	// request (stream GET and message POSTs alike). Overrides any
@@ -64,8 +64,8 @@ type SSEBackend struct {
 }
 
 // endpointWait bounds how long Send waits for the server's endpoint event
-// before giving up. The event is the first thing a healthy server emits, so
-// this only triggers against broken or misidentified endpoints.
+// before giving up. A healthy server emits that event first, so the timeout
+// fires only against broken or misidentified endpoints.
 const endpointWait = 30 * time.Second
 
 // NewSSE builds an unstarted legacy HTTP+SSE backend. cfg.URL is the SSE
@@ -93,9 +93,8 @@ func NewSSE(name string, cfg config.Backend, log *slog.Logger) *SSEBackend {
 // Name implements Backend.
 func (b *SSEBackend) Name() string { return b.name }
 
-// Start opens the SSE stream and waits for it to be established (headers
-// received). The endpoint event may arrive slightly later; Send waits for
-// it separately.
+// Start opens the SSE stream and returns once the response headers arrive.
+// The endpoint event may follow later; Send waits for it separately.
 func (b *SSEBackend) Start(ctx context.Context) error {
 	b.mu.Lock()
 	if b.started {
@@ -113,8 +112,8 @@ func (b *SSEBackend) Start(ctx context.Context) error {
 	b.started = true
 	b.mu.Unlock()
 
-	// The stream must outlive Start's ctx (it lives for the session);
-	// Close aborts it explicitly.
+	// The stream must outlive Start's ctx, since it runs for the whole
+	// session. Close aborts it.
 	streamCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	b.mu.Lock()
 	b.cancelStream = cancel
@@ -157,7 +156,7 @@ func (b *SSEBackend) Start(ctx context.Context) error {
 	if mt := mediaType(resp.Header.Get("Content-Type")); mt != "text/event-stream" {
 		resp.Body.Close()
 		cancel()
-		return fmt.Errorf("sse backend %s: expected text/event-stream, got %q — endpoint is likely streamable-http, use transport: streamable-http", b.name, mt)
+		return fmt.Errorf("sse backend %s: expected text/event-stream, got %q; endpoint speaks streamable-http, set transport: streamable-http", b.name, mt)
 	}
 
 	go b.readStream(resp.Body)
@@ -165,8 +164,8 @@ func (b *SSEBackend) Start(ctx context.Context) error {
 }
 
 // readStream consumes the long-lived SSE stream: the endpoint event unlocks
-// Send, message events go to Recv, stream end terminates the backend (the
-// session dies with it — MCP sessions cannot survive their event stream).
+// Send, message events go to Recv, and the end of the stream terminates the
+// backend, because an MCP session cannot survive its event stream.
 func (b *SSEBackend) readStream(body io.ReadCloser) {
 	defer body.Close()
 
@@ -211,8 +210,8 @@ func (b *SSEBackend) readStream(body io.ReadCloser) {
 	}
 	flush()
 
-	// Stream ended: terminate the backend so the session is torn down
-	// rather than silently losing all server→client traffic.
+	// Stream ended: terminate the backend. Staying up would drop every
+	// server→client message with no signal to the client.
 	err := sc.Err()
 	b.closeOnce.Do(func() {
 		b.mu.Lock()
@@ -259,9 +258,9 @@ func (b *SSEBackend) setEndpoint(raw string) {
 	}
 }
 
-// Send POSTs one JSON-RPC message to the endpoint URL. Responses do NOT
-// come back in the POST body — they arrive on the event stream — so any
-// 2xx is success here.
+// Send POSTs one JSON-RPC message to the endpoint URL. Responses arrive on
+// the event stream rather than in the POST body, so any 2xx counts as
+// success here.
 func (b *SSEBackend) Send(ctx context.Context, msg []byte) error {
 	b.mu.Lock()
 	if b.closed {
@@ -318,9 +317,9 @@ func (b *SSEBackend) Send(ctx context.Context, msg []byte) error {
 		return fmt.Errorf("sse backend %s: http %d: %s", b.name, resp.StatusCode, readExcerpt(resp.Body))
 	}
 	// Some servers echo the response in the POST body instead of (or in
-	// addition to) the stream. The spec says stream-only; tolerate the
-	// echo shape by delivering a JSON body when present, since dropping it
-	// would hang the waiter if the server never mirrors it to the stream.
+	// addition to) the stream. The spec says stream-only, but deliver a
+	// JSON body when one is present: dropping it hangs the waiter whenever
+	// the server never mirrors the response to the stream.
 	if mediaType(resp.Header.Get("Content-Type")) == "application/json" {
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxLineBytes))
 		if err == nil {

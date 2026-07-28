@@ -1,6 +1,6 @@
-// Package gateway is the MCP gateway core: it terminates streamable-HTTP on
-// the front, runs every message through the inspection pipeline, and routes
-// to one or more backends (aggregation with tool prefixes when several).
+// Package gateway is the MCP gateway core. It terminates streamable-HTTP on
+// the front, runs every message through the inspection pipeline, then routes
+// to one or more backends (aggregating with tool prefixes when several).
 package gateway
 
 import (
@@ -21,7 +21,7 @@ import (
 
 // IdentityResolver authenticates an HTTP request (inbound auth). It returns
 // the caller identity or an error that terminates the request. The gateway
-// itself is auth-agnostic; the daemon (or hoop) supplies this.
+// stays auth-agnostic: the daemon (or hoop) supplies the resolver.
 type IdentityResolver func(r *http.Request) (inspect.Identity, error)
 
 // Options assemble a Gateway.
@@ -36,8 +36,8 @@ type Options struct {
 	Sink audit.Sink
 	// SessionIdleTimeout reaps sessions with no traffic. 0 = 30m.
 	SessionIdleTimeout time.Duration
-	// RequestTimeout bounds one round-trip to a backend. 0 = 5m
-	// (tool calls can be legitimately slow; approvals hold longer via ctx).
+	// RequestTimeout bounds one round-trip to a backend. 0 = 5m, since
+	// slow tool calls are normal. Approvals hold longer via ctx.
 	RequestTimeout time.Duration
 	// Held is the approval parking lot; nil disables Hold verdicts
 	// (they become Deny).
@@ -191,10 +191,10 @@ func (g *Gateway) startSession(ctx context.Context, identity inspect.Identity) (
 		done:     make(chan struct{}),
 	}
 	c.touch()
-	// Backends live as long as the session, not the initialize request:
+	// Backends live as long as the session, not the initialize request.
 	// ctx here is the POST's request context and cancels the moment the
-	// response is written, which would kill stdio children mid-session.
-	// Session teardown happens explicitly via conn.shutdown.
+	// handler writes the response, which would kill stdio children
+	// mid-session. conn.shutdown tears the session down instead.
 	bctx := context.WithoutCancel(ctx)
 	for name, factory := range g.opts.Backends {
 		b, err := factory(bctx)

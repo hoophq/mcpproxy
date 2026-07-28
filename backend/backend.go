@@ -11,13 +11,13 @@ import (
 var ErrClosed = errors.New("backend closed")
 
 // Backend is one live connection to an MCP server. One instance serves one
-// MCP session; the gateway serializes Send calls per session.
+// MCP session, and the gateway serializes Send calls per session.
 type Backend interface {
 	// Name is the configured backend name (used as tool prefix in
 	// aggregation and as the audit backend label).
 	Name() string
-	// Start establishes the connection (spawns the child / probes the
-	// remote). Must be called once before Send.
+	// Start establishes the connection: it spawns the child or probes the
+	// remote. Call it once before Send.
 	Start(ctx context.Context) error
 	// Send delivers one JSON-RPC message (a complete envelope) to the
 	// server.

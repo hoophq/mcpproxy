@@ -319,8 +319,8 @@ func (g *Gateway) handleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// rewriteToolName clones env with params.name set to bare (aggregation
-// prefix stripped before the backend sees the call).
+// rewriteToolName clones env with params.name set to bare, dropping the
+// aggregation prefix before the backend sees the call.
 func rewriteToolName(env *jsonrpc.Message, bare string) *jsonrpc.Message {
 	var params map[string]json.RawMessage
 	if err := json.Unmarshal(env.Params, &params); err != nil {

@@ -12,22 +12,22 @@ import (
 )
 
 // maxLineBytes bounds one newline-delimited JSON-RPC message. Tool results
-// (file dumps, base64 images) are routinely megabytes, so the 64 KiB bufio
-// default is far too small; 16 MiB matches the gateway's inbound body limit.
+// (file dumps, base64 images) run to megabytes, so the 64 KiB bufio default
+// truncates them; 16 MiB matches the gateway's inbound body limit.
 const maxLineBytes = 16 << 20
 
-// recvBuffer is the depth of the Recv channel. Deep enough that a burst of
-// notifications does not stall the peer's stdout, shallow enough that a
-// wedged consumer applies backpressure instead of buffering without bound.
+// recvBuffer is the depth of the Recv channel. At this depth a burst of
+// notifications does not stall the peer's stdout, and a wedged consumer
+// applies backpressure instead of buffering without bound.
 const recvBuffer = 64
 
 // lineConn frames newline-delimited JSON-RPC over a byte stream: one message
-// per line, tolerating CRLF. It is the transport half of StdioBackend, split
-// out so the framing can be exercised over an in-process pipe without a
+// per line, tolerating CRLF. It is the transport half of StdioBackend, kept
+// separate so tests can drive the framing over an in-process pipe without a
 // subprocess in the way.
 //
-// Writes are serialized and short-write-checked: a truncated envelope would
-// desynchronize the peer's framing for the rest of the session.
+// send serializes writes and checks for short ones: a truncated envelope
+// would desynchronize the peer's framing for the rest of the session.
 type lineConn struct {
 	name string
 	log  *slog.Logger
@@ -62,8 +62,8 @@ func (c *lineConn) attach(w io.WriteCloser) {
 	c.wmu.Unlock()
 }
 
-// pump reads framed messages from r until EOF and forwards them to recv. It
-// returns when r is exhausted or the conn is stopped.
+// pump reads framed messages from r and forwards them to recv. It returns
+// when r hits EOF or stop closes.
 func (c *lineConn) pump(r io.Reader) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
@@ -73,8 +73,8 @@ func (c *lineConn) pump(r io.Reader) {
 			continue
 		}
 		// Servers launched through npx/node print banners and progress
-		// on stdout. Anything that cannot open a JSON-RPC envelope is
-		// diagnostics, not protocol, and must not reach the gateway.
+		// on stdout. A line that cannot open a JSON-RPC envelope is
+		// diagnostics and must not reach the gateway.
 		if line[0] != '{' && line[0] != '[' {
 			c.log.Debug("backend non-json stdout", "backend", c.name, "line", string(line))
 			continue

@@ -14,9 +14,9 @@ import (
 
 // TestRemoteConcurrentSendClose hammers the seam the inflight counter
 // defends: a Send that already passed the closed check must finish delivering
-// without ever writing to a closed recv channel. The only outcomes allowed
-// are success and ErrClosed — Close does not abort requests already issued.
-// Run with -race; a regression panics or trips the detector.
+// without writing to a closed recv channel. Success and ErrClosed are the
+// only allowed outcomes, since Close does not abort requests already issued.
+// Run with -race. A regression panics or trips the detector.
 func TestRemoteConcurrentSendClose(t *testing.T) {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

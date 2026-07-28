@@ -33,9 +33,9 @@ func startRemote(t *testing.T, h http.Handler) (*RemoteBackend, *httptest.Server
 	return b, hs
 }
 
-// TestRemoteRoundTripJSON and its SSE twin assert the same observable
-// contract — one response message on Recv — across both legal
-// streamable-HTTP response framings.
+// TestRemoteRoundTripJSON and its SSE twin assert one observable contract,
+// a single response message on Recv, across both legal streamable-HTTP
+// response framings.
 func TestRemoteRoundTripJSON(t *testing.T) {
 	srv := testmcp.New()
 	b, _ := startRemote(t, srv.HTTPHandler())
@@ -82,8 +82,8 @@ func TestRemoteSSEMultipleEvents(t *testing.T) {
 	b, _ := startRemote(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		// A comment line, an event name and a multi-line data field all
-		// have to be handled per the SSE spec.
+		// The SSE spec requires handling a comment line, an event name
+		// and a multi-line data field.
 		fmt.Fprint(w, ": keepalive\n\n")
 		fmt.Fprint(w, "event: message\nid: 1\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\n")
 		fmt.Fprint(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\n")
@@ -105,7 +105,7 @@ func TestRemoteSSEMultipleEvents(t *testing.T) {
 }
 
 // TestRemoteSSEFinalEventWithoutBlankLine: a server that closes the stream
-// right after the last data line still delivered a complete event.
+// right after the last data line still sent a complete event.
 func TestRemoteSSEFinalEventWithoutBlankLine(t *testing.T) {
 	b, _ := startRemote(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -173,7 +173,7 @@ func TestRemoteNoPayloadStatuses(t *testing.T) {
 }
 
 // TestRemoteUnauthorized: a 401 must arrive as a typed error carrying the
-// challenge, because that header is what drives OAuth discovery.
+// challenge, because OAuth discovery reads that header.
 func TestRemoteUnauthorized(t *testing.T) {
 	const challenge = `Bearer resource_metadata="https://api.example.com/.well-known/oauth-protected-resource"`
 	b, _ := startRemote(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -215,8 +215,8 @@ func TestRemoteHTTPErrorStatus(t *testing.T) {
 }
 
 // TestRemoteTokenSource: static headers apply, and TokenSource wins on
-// Authorization — that precedence is what lets OAuth override a stale static
-// credential without rewriting the config.
+// Authorization. That precedence lets OAuth override a stale static
+// credential without a config rewrite.
 func TestRemoteTokenSource(t *testing.T) {
 	type capture struct{ auth, custom, contentType, accept string }
 	got := make(chan capture, 1)
@@ -287,7 +287,7 @@ func TestRemoteTokenSourceFailureAborts(t *testing.T) {
 		t.Fatalf("Send = %v, want the token source error wrapped", err)
 	}
 	if hits != 0 {
-		t.Errorf("server saw %d requests, want 0 — an unauthenticated request must not go out", hits)
+		t.Errorf("server saw %d requests, want 0; an unauthenticated request must not go out", hits)
 	}
 }
 
@@ -365,8 +365,8 @@ func TestRemoteCloseDuringSSE(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		fl := w.(http.Flusher)
 		fl.Flush()
-		// Flood past the Recv buffer so the SSE reader is parked on a
-		// send when Close arrives.
+		// Flood past the Recv buffer so the SSE reader parks on a send
+		// before Close arrives.
 		for i := range recvBuffer * 2 {
 			fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"method\":\"n%d\"}\n\n", i)
 			fl.Flush()
@@ -390,7 +390,7 @@ func TestRemoteCloseDuringSSE(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Close deadlocked against an in-flight SSE stream")
 	}
-	// Draining after Close must terminate rather than block forever.
+	// Draining after Close must terminate rather than block.
 	for range b.Recv() {
 	}
 }

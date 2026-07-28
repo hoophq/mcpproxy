@@ -87,7 +87,7 @@ func TestNewFactoryTransportSelection(t *testing.T) {
 }
 
 // TestNewFactoryBuildsIndependentBackends: one Backend serves one session, so
-// two calls must not share state.
+// two factory calls must not share state.
 func TestNewFactoryBuildsIndependentBackends(t *testing.T) {
 	f := NewFactory("bk", config.Backend{Transport: TransportStdio, Command: []string{"cat"}}, nil)
 	ctx := context.Background()
@@ -112,7 +112,7 @@ func TestNewFactoryBuildsIndependentBackends(t *testing.T) {
 }
 
 // Compile-time proof that both transports satisfy the interface the gateway
-// programs against.
+// calls through.
 var (
 	_ Backend = (*StdioBackend)(nil)
 	_ Backend = (*RemoteBackend)(nil)

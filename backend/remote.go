@@ -43,13 +43,13 @@ const mcpSessionHeader = "Mcp-Session-Id"
 const maxErrorBody = 2 << 10
 
 // RemoteBackend speaks MCP streamable-HTTP: every client message is POSTed to
-// a single endpoint, and the remote answers either with one JSON object or
-// with an SSE stream carrying several messages. Both shapes are normalized
-// into the Recv channel, so callers cannot tell them apart.
+// a single endpoint, and the remote answers with one JSON object or with an
+// SSE stream carrying several messages. Send normalizes both shapes into the
+// Recv channel, so callers cannot tell them apart.
 type RemoteBackend struct {
 	// TokenSource, when non-nil, mints the outbound bearer token for each
-	// request. This is the seam for passthrough and OAuth outbound auth;
-	// it overrides any Authorization in the static headers.
+	// request. Passthrough and OAuth outbound auth plug in here, and the
+	// minted token overrides any Authorization in the static headers.
 	TokenSource func(ctx context.Context) (string, error)
 
 	// Client overrides the per-instance HTTP client. Set before Start.
@@ -66,8 +66,8 @@ type RemoteBackend struct {
 	stop chan struct{}
 
 	// inflight counts Sends and background SSE readers. Close waits for it
-	// to drain before closing recv: a send on a closed channel would panic
-	// the whole gateway.
+	// to drain before closing recv, because a send on a closed channel
+	// panics the whole gateway.
 	inflight sync.WaitGroup
 
 	mu      sync.Mutex
@@ -101,8 +101,8 @@ func NewRemote(name string, cfg config.Backend, log *slog.Logger) *RemoteBackend
 
 func (b *RemoteBackend) Name() string { return b.name }
 
-// Start validates configuration and prepares the HTTP client. No request is
-// issued: streamable-HTTP has no handshake of its own, so the first POST
+// Start validates configuration and prepares the HTTP client. It issues no
+// request: streamable-HTTP has no handshake of its own, so the first POST
 // (the client's initialize) doubles as the connection probe.
 func (b *RemoteBackend) Start(_ context.Context) error {
 	b.mu.Lock()
@@ -116,8 +116,8 @@ func (b *RemoteBackend) Start(_ context.Context) error {
 	if b.Client == nil {
 		// Per-instance client so one backend's connection pool, timeouts
 		// and (later) TLS settings never leak into another's. No overall
-		// Timeout: an SSE response body is long-lived by design; request
-		// deadlines ride on the context instead.
+		// Timeout: an SSE response body is long-lived by design, so
+		// request deadlines ride on the context instead.
 		b.Client = &http.Client{
 			Transport: &http.Transport{
 				MaxIdleConnsPerHost:   4,
@@ -133,8 +133,8 @@ func (b *RemoteBackend) Start(_ context.Context) error {
 }
 
 // Send POSTs one JSON-RPC message and routes whatever comes back into Recv.
-// It returns once the response headers are read and, for JSON responses, the
-// body is consumed; SSE bodies are drained in the background so a long tool
+// It returns once it has read the response headers and, for JSON responses,
+// consumed the body. A background goroutine drains SSE bodies so a long tool
 // call does not block the caller.
 func (b *RemoteBackend) Send(ctx context.Context, msg []byte) error {
 	b.mu.Lock()
@@ -158,8 +158,8 @@ func (b *RemoteBackend) Send(ctx context.Context, msg []byte) error {
 	if err != nil {
 		return fmt.Errorf("remote backend %s: building request: %w", b.name, err)
 	}
-	// Static headers first so an explicit Accept/Content-Type in config
-	// can be overridden by nothing, and TokenSource can still win below.
+	// Static headers go first. The protocol Content-Type and Accept set
+	// below take precedence, and TokenSource wins over both.
 	for k, v := range b.headers {
 		req.Header.Set(k, v)
 	}
@@ -241,9 +241,9 @@ func (b *RemoteBackend) Send(ctx context.Context, msg []byte) error {
 }
 
 // readSSE parses text/event-stream framing and forwards each data payload as
-// one JSON-RPC message. Multi-line data fields are joined with newlines per
-// the SSE spec; comments (":..."), ids and event names are ignored because
-// MCP carries everything in data.
+// one JSON-RPC message. It joins multi-line data fields with newlines per the
+// SSE spec and skips comments (":..."), ids and event names, because MCP
+// carries everything in data.
 func (b *RemoteBackend) readSSE(r io.Reader) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
@@ -307,9 +307,9 @@ func (b *RemoteBackend) Recv() <-chan []byte { return b.recv }
 
 func (b *RemoteBackend) Done() <-chan struct{} { return b.done }
 
-// Err is always nil: a remote backend has no asynchronous failure mode of
-// its own. Transport errors surface synchronously from Send, and Done closes
-// only via Close.
+// Err always returns nil. A remote backend has no asynchronous failure mode
+// of its own: transport errors surface from Send, and only Close closes
+// Done.
 func (b *RemoteBackend) Err() error { return nil }
 
 // Close stops accepting new traffic, aborts in-flight streams and closes
@@ -321,8 +321,8 @@ func (b *RemoteBackend) Close() error {
 		client := b.Client
 		b.mu.Unlock()
 
-		// stop first so parked deliveries give up, then drain: after
-		// this Wait no goroutine can still be holding recv.
+		// stop first so parked deliveries give up, then drain. Past
+		// this Wait no goroutine can still hold recv.
 		close(b.stop)
 		b.inflight.Wait()
 		close(b.recv)

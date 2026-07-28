@@ -97,8 +97,8 @@ func (c *conn) shutdown(reason error) {
 	})
 }
 
-// pump drains one backend's recv stream: responses are delivered to their
-// waiter; server-initiated traffic goes through the S2C pipeline to the SSE
+// pump drains one backend's recv stream. It hands responses to their waiter
+// and pushes server-initiated traffic through the S2C pipeline to the SSE
 // stream.
 func (c *conn) pump(bc *backendConn) {
 	for {
@@ -163,7 +163,7 @@ func (c *conn) inspectS2C(bc *backendConn, env *jsonrpc.Message) ([]byte, bool) 
 		}
 		return out, true
 	case inspect.Deny:
-		// Answer the server's request with an error so it isn't left hanging.
+		// Answer the server's request with an error so it stops waiting.
 		if env.IsRequest() && dec.Reply != nil {
 			if rb, err := dec.Reply.Marshal(); err == nil {
 				_ = bc.b.Send(ctx, rb)
@@ -226,7 +226,7 @@ func coalesce(a, b string) string {
 }
 
 // routeTool resolves an aggregated tool name "backend_tool" to (backendConn,
-// bare tool name). Single-backend gateways route everything to that backend
+// bare tool name). A single-backend gateway routes everything to that backend
 // unprefixed.
 func (c *conn) routeTool(name string) (*backendConn, string, error) {
 	if !c.g.aggregated() {
@@ -344,9 +344,9 @@ func (c *conn) notifyAll(ctx context.Context, env *jsonrpc.Message) error {
 	return nil
 }
 
-// fanoutToolsList queries every backend and merges tool lists, prefixing
-// names in aggregation mode. Mutates env.ID per-backend safe: same id is
-// reused per backend (waiters are per-backend).
+// fanoutToolsList queries every backend and merges the tool lists, prefixing
+// names in aggregation mode. Reusing env.ID across backends is safe because
+// waiters are per-backend.
 func (c *conn) fanoutToolsList(ctx context.Context, env *jsonrpc.Message) (*jsonrpc.Message, error) {
 	merged := mcp.ToolsListResult{Tools: []json.RawMessage{}}
 	for name, bc := range c.backends {

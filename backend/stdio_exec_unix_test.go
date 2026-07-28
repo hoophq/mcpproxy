@@ -18,12 +18,12 @@ import (
 	"github.com/hoophq/mcpproxy/config"
 )
 
-// These tests spawn real children. They are unix-only because they assert on
-// process groups and POSIX shell behaviour.
+// These tests spawn real children. They stay unix-only because they assert
+// on process groups and POSIX shell behaviour.
 
 // TestStdioBackendSpawnRoundTrip drives the full spawn path against the
 // testmcp binary launched through `go run`, which makes the MCP server a
-// *grandchild* — the same shape as `npx some-mcp-server`.
+// *grandchild*, the same shape as `npx some-mcp-server`.
 func TestStdioBackendSpawnRoundTrip(t *testing.T) {
 	b := NewStdio("spawned", config.Backend{
 		Transport: TransportStdio,
@@ -40,7 +40,7 @@ func TestStdioBackendSpawnRoundTrip(t *testing.T) {
 	if err := b.Send(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)); err != nil {
 		t.Fatalf("Send initialize: %v", err)
 	}
-	// `go run` compiles first, so the first response can take a while.
+	// `go run` compiles first, so the first response takes a while.
 	got := recvMessage(t, b.Recv(), 120*time.Second)
 	if got.Error != nil {
 		t.Fatalf("initialize errored: %v", got.Error)
@@ -111,8 +111,8 @@ func TestStdioBackendReportsChildExit(t *testing.T) {
 }
 
 // TestLineConnEPIPEIsErrClosed: when a child dies on its own, the next write
-// gets EPIPE. The gateway must see the same ErrClosed it gets from an
-// orderly Close, not a raw syscall error it would have to special-case.
+// gets EPIPE. The gateway must see the same ErrClosed an orderly Close
+// produces, sparing it a special case for the raw syscall error.
 func TestLineConnEPIPEIsErrClosed(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -130,12 +130,12 @@ func TestLineConnEPIPEIsErrClosed(t *testing.T) {
 }
 
 // TestStdioBackendKillsProcessGroup is the reason Start sets Setpgid: `sh`
-// forks a `sleep` grandchild exactly like `npx` forks node. Signalling only
-// the direct child would orphan the sleeper.
+// forks a `sleep` grandchild the way `npx` forks node. Signalling only the
+// direct child would orphan the sleeper.
 func TestStdioBackendKillsProcessGroup(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
 	// The shell traps SIGTERM and ignores stdin EOF, so Close must escalate
-	// all the way to SIGKILL — and the sleeper must die with the group.
+	// to SIGKILL, and the sleeper must die with the group.
 	script := "trap '' TERM; sleep 100 & echo $! > " + pidFile + "; wait"
 	b := NewStdio("group", config.Backend{
 		Transport: TransportStdio,
@@ -163,8 +163,8 @@ func TestStdioBackendKillsProcessGroup(t *testing.T) {
 	}
 }
 
-// TestStdioBackendClosesOnStdinEOF covers the polite path: a child that exits
-// on EOF must be reaped without any signal, well inside politeGrace.
+// TestStdioBackendClosesOnStdinEOF covers the polite path: reap must collect
+// a child that exits on EOF without any signal, inside politeGrace.
 func TestStdioBackendClosesOnStdinEOF(t *testing.T) {
 	b := NewStdio("polite", config.Backend{
 		Transport: TransportStdio,
@@ -173,7 +173,7 @@ func TestStdioBackendClosesOnStdinEOF(t *testing.T) {
 	if err := b.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	// cat echoes back, proving the pump is live before we shut down.
+	// cat echoes back, proving the pump is live before the shutdown.
 	if err := b.Send(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"ping"}`)); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -281,6 +281,6 @@ func waitForPID(t *testing.T, path string) int {
 	}
 }
 
-// processAlive reports whether pid still exists. Signal 0 performs the
-// existence and permission checks without delivering anything.
+// processAlive reports whether pid still exists. Signal 0 runs the existence
+// and permission checks without delivering anything.
 func processAlive(pid int) bool { return syscall.Kill(pid, 0) == nil }

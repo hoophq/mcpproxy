@@ -1,8 +1,8 @@
 package backend
 
 // Tests for the legacy HTTP+SSE backend against an in-process fake server
-// implementing the 2024-11-05 transport: GET stream emitting an endpoint
-// event, POST /messages answered over the stream.
+// speaking the 2024-11-05 transport: a GET stream that emits an endpoint
+// event, and POST /messages answered over that stream.
 
 import (
 	"context"
@@ -28,7 +28,7 @@ type fakeSSEServer struct {
 	posts   [][]byte    // bodies received on the message endpoint
 	authHdr string      // last Authorization seen
 	// echoInBody makes POST answer with JSON in the body instead of the
-	// stream (a tolerated off-spec server shape).
+	// stream, a tolerated off-spec server shape.
 	echoInBody bool
 	// relativeEndpoint emits the endpoint event as a relative URL.
 	relativeEndpoint bool
