@@ -69,6 +69,19 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 		return
 	}
 
+	// Decide the protocol era before touching session state: a Modern
+	// request carries no session id and must not be measured against the
+	// Legacy front door's rules.
+	rev, protoErr := classify(r, env)
+	if protoErr != nil {
+		writeJSON(w, http.StatusBadRequest, protoErr)
+		return
+	}
+	if rev == mcp.RevisionModern {
+		g.refuseModern(w, env)
+		return
+	}
+
 	sid := r.Header.Get(sessionHeader)
 	var c *conn
 	if env.Method == mcp.MethodInitialize {

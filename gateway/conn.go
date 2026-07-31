@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -244,12 +245,15 @@ func (c *conn) routeTool(name string) (*backendConn, string, error) {
 }
 
 // anyBackend returns the sole backend (single-backend mode) or the first in
-// deterministic-enough order for methods that need one target.
+// sorted-name order for methods that need one target. Sorted rather than
+// arbitrary so that under aggregation the same method always lands on the
+// same backend, making both routing and audit reproducible.
 func (c *conn) anyBackend() *backendConn {
-	for _, bc := range c.backends {
-		return bc
+	names := c.backendNames()
+	if len(names) == 0 {
+		return nil
 	}
-	return nil
+	return c.backends[names[0]]
 }
 
 // roundTrip sends env to bc and awaits the matching response.
@@ -294,7 +298,8 @@ func (c *conn) fanoutInitialize(ctx context.Context, env *jsonrpc.Message) (*jso
 	c.state.ClientInfo = p.ClientInfo
 
 	var first *jsonrpc.Message
-	for name, bc := range c.backends {
+	for _, name := range c.backendNames() {
+		bc := c.backends[name]
 		resp, err := c.roundTrip(ctx, bc, env)
 		if err != nil {
 			return nil, fmt.Errorf("initialize %s: %w", name, err)
@@ -348,32 +353,101 @@ func (c *conn) notifyAll(ctx context.Context, env *jsonrpc.Message) error {
 // names in aggregation mode. Reusing env.ID across backends is safe because
 // waiters are per-backend.
 func (c *conn) fanoutToolsList(ctx context.Context, env *jsonrpc.Message) (*jsonrpc.Message, error) {
-	merged := mcp.ToolsListResult{Tools: []json.RawMessage{}}
-	for name, bc := range c.backends {
-		resp, err := c.roundTrip(ctx, bc, env)
+	merged := map[string]json.RawMessage{}
+	tools := []json.RawMessage{}
+	// Iterate backends in a stable order: the spec asks for a deterministic
+	// tools/list so clients can cache the catalog and keep upstream prompt
+	// caches stable. Go randomizes map iteration, so ranging c.backends
+	// directly reshuffles the merged list on every call.
+	for _, name := range c.backendNames() {
+		resp, err := c.roundTrip(ctx, c.backends[name], env)
 		if err != nil {
 			return nil, fmt.Errorf("tools/list %s: %w", name, err)
 		}
 		if resp.Error != nil {
 			return resp, nil
 		}
-		var res mcp.ToolsListResult
-		if err := json.Unmarshal(resp.Result, &res); err != nil {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(resp.Result, &fields); err != nil {
 			return nil, fmt.Errorf("tools/list %s: bad result: %w", name, err)
 		}
-		for _, rawTool := range res.Tools {
+		var res []json.RawMessage
+		if raw, ok := fields["tools"]; ok {
+			if err := json.Unmarshal(raw, &res); err != nil {
+				return nil, fmt.Errorf("tools/list %s: bad tools array: %w", name, err)
+			}
+		}
+		for _, rawTool := range res {
 			out := rawTool
 			if c.g.aggregated() {
 				out = prefixToolName(rawTool, name+"_")
 			}
-			merged.Tools = append(merged.Tools, out)
+			tools = append(tools, out)
 		}
+		mergeListFields(merged, fields)
 	}
+	toolsRaw, err := json.Marshal(tools)
+	if err != nil {
+		return nil, err
+	}
+	merged["tools"] = toolsRaw
 	b, err := json.Marshal(merged)
 	if err != nil {
 		return nil, err
 	}
 	return &jsonrpc.Message{JSONRPC: "2.0", ID: env.ID, Result: b}, nil
+}
+
+// backendNames returns backend names in sorted order, so every fan-out and
+// every merged catalog is byte-stable across calls.
+func (c *conn) backendNames() []string {
+	names := make([]string, 0, len(c.backends))
+	for name := range c.backends {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// mergeListFields folds one backend's result envelope into the merged one,
+// preserving fields the gateway does not model so a newer revision survives
+// the merge. Only "tools" is rebuilt by the caller.
+//
+// Cache hints need real arithmetic rather than last-writer-wins: the merged
+// catalog is only as fresh as its stalest contributor, so ttlMs takes the
+// minimum, and it is only as shareable as its most restrictive contributor,
+// so any "private" scope makes the whole result private. Dropping these (the
+// previous behavior, which rebuilt a typed result) silently discarded a
+// backend's caching policy; taking a maximum would let one permissive backend
+// license a shared cache to serve another's private catalog.
+func mergeListFields(dst, src map[string]json.RawMessage) {
+	for k, v := range src {
+		switch k {
+		case "tools", "nextCursor":
+			// Rebuilt by the caller; a per-backend cursor is meaningless
+			// once several catalogs are concatenated.
+		case "ttlMs":
+			var incoming, existing float64
+			if json.Unmarshal(v, &incoming) != nil {
+				continue
+			}
+			if cur, ok := dst[k]; !ok || json.Unmarshal(cur, &existing) != nil || incoming < existing {
+				dst[k] = v
+			}
+		case "cacheScope":
+			var scope string
+			if json.Unmarshal(v, &scope) != nil {
+				continue
+			}
+			if _, ok := dst[k]; !ok || scope != "public" {
+				dst[k] = v
+			}
+		default:
+			if _, ok := dst[k]; !ok {
+				dst[k] = v
+			}
+		}
+	}
 }
 
 // prefixToolName rewrites the "name" field of a raw tool entry.

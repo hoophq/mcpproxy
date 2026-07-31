@@ -25,7 +25,8 @@ third-party code you did not write. Put mcpproxy on that path and you get:
   schema). If a fingerprint changes mid-session, mcpproxy kills the session
   or raises an alert.
 - **Server-request gating:** the gateway denies `sampling/createMessage`
-  and `elicitation/create` from the server by default.
+  and `elicitation/create` from the server by default, whether the server
+  asks directly or embeds the ask in a `2026-07-28` `input_required` result.
 - **Budgets:** max calls per session, per-tool rate limits, result-size
   truncation.
 - **Audit:** structured events (`mcp.tool_call`, `mcp.tool_denied`,
@@ -95,6 +96,24 @@ guide: [`docs/architectural/`](docs/architectural/).
 | `GET /healthz` | liveness |
 | `GET /metrics` | Prometheus (when `telemetry.prometheus_path` set) |
 | `/.well-known/*`, `/authorize`, `/token`, `/register`, `/callback` | embedded auth server (when `auth_server` set) |
+
+## Protocol revisions
+
+mcpproxy serves the session-based MCP revisions through `2025-11-25`.
+
+It recognizes `2026-07-28` (the stateless revision) and refuses it with a
+conformant `-32022` naming `2025-11-25`, so a dual-era client retries on the
+session path instead of failing. A request whose mirrored `Mcp-Method` /
+`Mcp-Name` / `MCP-Protocol-Version` headers disagree with its body is
+rejected with `-32020`: an intermediary routing on the header and the gateway
+executing the body would otherwise act on different requests.
+
+The refusal is deliberate. Several controls — rug-pull detection, per-session
+call budgets, and override un-renaming — decide by comparing across requests
+in a session. Serving them statelessly today would not weaken them, it would
+silently disable them, because each no-ops when its state is empty. The list
+lives in `Gateway.statelessBlockers`; when it empties, the stateless path can
+be served.
 
 ## Session recording
 

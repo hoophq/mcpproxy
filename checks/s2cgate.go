@@ -40,19 +40,13 @@ func (g *S2CGate) Name() string { return NameS2CGate }
 
 // Inspect implements inspect.Check.
 func (g *S2CGate) Inspect(_ context.Context, _ inspect.Session, m *inspect.Msg) inspect.Decision {
-	if m == nil || m.Env == nil || m.Dir != inspect.S2C || m.Env.Method == "" {
+	if m == nil || m.Env == nil || m.Dir != inspect.S2C {
 		return inspect.AllowAll
 	}
-	var blocked bool
-	var reason string
-	switch m.Env.Method {
-	case mcp.MethodSamplingCreateMessage:
-		blocked, reason = g.blockSampling, "sampling/createMessage is blocked by policy"
-	case mcp.MethodElicitationCreate:
-		blocked, reason = g.blockElicitation, "elicitation/create is blocked by policy"
-	default:
-		return inspect.AllowAll
+	if m.Env.Method == "" {
+		return g.inspectResult(m)
 	}
+	blocked, reason := g.ruleFor(m.Env.Method)
 	if !blocked {
 		return inspect.AllowAll
 	}
@@ -60,4 +54,44 @@ func (g *S2CGate) Inspect(_ context.Context, _ inspect.Session, m *inspect.Msg) 
 	// the backend is the one left waiting, and the gateway sends this error
 	// back down to it.
 	return inspect.Denyf(m.Env, jsonrpc.CodePolicyDenied, NameS2CGate, reason)
+}
+
+// inspectResult applies the same policy to a Multi Round-Trip Request interim
+// result, the shape that replaced server-initiated requests in MCP
+// 2026-07-28.
+//
+// The server no longer asks the client directly. It answers the client's own
+// tools/call with resultType "input_required" and an inputRequests map naming
+// the sampling or elicitation it wants. Same inversion of trust, carried on a
+// response instead of a request — so the method switch above never sees it,
+// and without this arm the gate's default-deny would silently stop applying
+// the moment a backend adopts the new revision.
+//
+// Denying answers the *client's* request id, unlike the request arm: here the
+// client is the one waiting, and it must not be handed a prompt the operator
+// blocked.
+func (g *S2CGate) inspectResult(m *inspect.Msg) inspect.Decision {
+	if !mcp.ResultRequiresInput(m.Env.Result) {
+		return inspect.AllowAll
+	}
+	for _, method := range mcp.InputRequestMethods(m.Env.Result) {
+		if blocked, reason := g.ruleFor(method); blocked {
+			return inspect.Denyf(m.Env, jsonrpc.CodePolicyDenied, NameS2CGate, reason)
+		}
+	}
+	return inspect.AllowAll
+}
+
+// ruleFor reports whether a server-to-client request method is blocked, and
+// why. Shared by both arms so a request and an MRTR input request for the
+// same capability can never resolve differently.
+func (g *S2CGate) ruleFor(method string) (blocked bool, reason string) {
+	switch method {
+	case mcp.MethodSamplingCreateMessage:
+		return g.blockSampling, "sampling/createMessage is blocked by policy"
+	case mcp.MethodElicitationCreate:
+		return g.blockElicitation, "elicitation/create is blocked by policy"
+	default:
+		return false, ""
+	}
 }
