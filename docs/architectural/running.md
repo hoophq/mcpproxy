@@ -77,9 +77,13 @@ jq -r '[.time, .event, .tool // "", .reason // ""] | @tsv' sessions/<sid>.jsonl
 
 ### State
 
-- `$MCPPROXY_STATE_DIR` (default `~/.mcpproxy`): OAuth tokens plus DCR
-  client registrations, AES-256-GCM encrypted. `tokens.key` is the
-  keyfile, so protect it and back it up alongside `tokens.enc`.
+- `$MCPPROXY_STATE_DIR` (default `~/.mcpproxy`): outbound OAuth tokens,
+  AES-256-GCM encrypted. `tokens.key` is the keyfile, so protect it and
+  back it up alongside `tokens.enc`. Losing the key while keeping the
+  ciphertext makes the daemon fail to start.
+- DCR client registrations are **not** persisted: the daemon leaves the
+  client store unset, so each restart re-registers with the upstream
+  authorization server.
 - The embedded auth server keeps sessions and codes in memory, so clients
   re-authenticate after a restart.
 

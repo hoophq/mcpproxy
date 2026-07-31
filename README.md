@@ -84,6 +84,16 @@ ready-to-run configs: [`examples/remote/`](examples/remote/).
 Architecture, auth planes, pipeline internals, operations, and embedding
 guide: [`docs/architectural/`](docs/architectural/).
 
+## Deployment
+
+Running it outside hoop, on GCP or AWS: [`docs/deployment/`](docs/deployment/).
+Start with [the constraints page](docs/deployment/README.md) — the daemon
+keeps sessions, approvals, and auth-server state in memory, so it is
+single-replica by construction and a round-robin load balancer in front of
+two instances answers `404 unknown session`. That page also covers the
+container image, TLS termination, state volumes, and the exposure
+checklist; 
+
 ## HTTP surface
 
 | Endpoint | Purpose |
@@ -126,10 +136,10 @@ cat sessions/<sid>.jsonl | jq -r '[.time,.event,.tool // "",.reason // ""] | @ts
 
 ## State
 
-mcpproxy stores OAuth tokens and DCR client registrations under
-`$MCPPROXY_STATE_DIR` (default `~/.mcpproxy`), encrypted with AES-256-GCM
-under a generated keyfile. The embedded auth server keeps its sessions in
-memory.
+mcpproxy stores outbound OAuth tokens under `$MCPPROXY_STATE_DIR` (default
+`~/.mcpproxy`), encrypted with AES-256-GCM under a generated keyfile. DCR
+client registrations are not persisted, so a restart re-registers. The
+embedded auth server keeps its sessions in memory.
 
 ## Embedding
 
