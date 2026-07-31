@@ -11,5 +11,5 @@
 - [embedding.md](embedding.md): the gateway as a library, plus the hoop
   integration seams
 
-Deployment guides (GCP, AWS, containers, hoop comparison) live one level
+Deployment guides (GCP, AWS, containers) live one level
 up in [../deployment/](../deployment/).
