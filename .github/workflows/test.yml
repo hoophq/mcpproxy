@@ -1,0 +1,100 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: gofmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # go.mod is the single source of truth for the toolchain. Its `go`
+          # directive is a full version (1.26.2), and setup-go treats a
+          # three-component spec as an exact pin rather than a 1.26.x range —
+          # so bumping the toolchain means editing go.mod, nothing here.
+          go-version-file: go.mod
+      - name: Check formatting
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "::error::These files are not gofmt-clean:"
+            echo "$out"
+            exit 1
+          fi
+      - name: Check go.mod/go.sum are tidy
+        run: |
+          go mod tidy
+          if ! git diff --quiet go.mod go.sum; then
+            echo "::error::go.mod/go.sum are not tidy — run 'go mod tidy' and commit:"
+            git --no-pager diff go.mod go.sum
+            exit 1
+          fi
+
+  test:
+    # One module, so a single `./...` covers everything. Tests spawn real
+    # child processes (backend/stdio_exec_unix_test.go runs the testmcp
+    # server through `go run`, the same grandchild shape as `npx`), which is
+    # why this needs a full toolchain and not just a build cache.
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  build:
+    # `go vet` on the test runner only type-checks the linux files, so
+    # backend/procgroup_windows.go is never compiled there. Vetting per
+    # GOOS/GOARCH is what keeps the build-tagged files and the release
+    # targets honest.
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    env:
+      CGO_ENABLED: "0"
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go build ./...
+
+  examples:
+    # The shipped YAML is documentation users copy: parse it and run
+    # config.Validate over it so a renamed field cannot rot silently.
+    # config.Load expands ${VAR}, and mode:static rejects an empty token, so
+    # the placeholders referenced by the examples get dummy values here.
+    name: Validate example configs
+    runs-on: ubuntu-latest
+    env:
+      GATEWAY_TOKEN: ci-placeholder
+      MCPPROXY_TOKEN: ci-placeholder
+      MCPPROXY_APPROVAL_TOKEN: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go run ./cmd/configcheck config.example.yaml examples/*.yaml examples/remote/*.yaml

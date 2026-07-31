@@ -1,0 +1,175 @@
+name: Binary Release
+
+# Auto Release creates the vX.Y.Z tag/release with GITHUB_TOKEN, and a tag
+# pushed by GITHUB_TOKEN cannot start a `push: tags` workflow. So this chains
+# off Auto Release's completion: it cross-compiles the mcpproxy commands
+# (mcpproxyd plus the configcheck / import-catalog / mcpsmoke operator tools)
+# and uploads the archives and checksums to that release.
+#
+# No Homebrew tap here, unlike alcatraz: this repo is private, so a formula
+# pointing at its release assets could not be downloaded by `brew install`.
+# Add the tap step if and when the repo goes public.
+#
+# The manual trigger re-publishes binaries for an existing tag — the recovery
+# path when a release was cut while this workflow was broken.
+on:
+  workflow_run:
+    workflows: ["Auto Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing release tag to (re)publish binaries for, without the leading v (e.g. 0.5.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+# Serialize runs so back-to-back releases can't race on uploading assets to
+# the same release.
+concurrency:
+  group: binary-release
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve release tag
+    runs-on: ubuntu-latest
+    # Auto Release runs on every push to main; act only on successful runs.
+    # Manual dispatches name their tag explicitly and always proceed.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      publish: ${{ steps.dispatch.outputs.publish || steps.tag.outputs.publish }}
+      version: ${{ steps.dispatch.outputs.version || steps.tag.outputs.version }}
+      ref: ${{ steps.dispatch.outputs.ref || steps.tag.outputs.ref }}
+    steps:
+      - name: Use the dispatched tag
+        id: dispatch
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          RAW: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # This job has write permissions: refuse to build/upload for a
+          # malformed version or a tag that has no release.
+          VERSION="${RAW#v}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'${RAW}' is not a semver version (want X.Y.Z)"
+            exit 1
+          fi
+          if ! gh release view "v${VERSION}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "::error::release v${VERSION} does not exist in ${{ github.repository }} — create the release first, this workflow only attaches binaries"
+            exit 1
+          fi
+          {
+            echo "publish=true"
+            echo "version=${VERSION}"
+            echo "ref=v${VERSION}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Publishing v${VERSION} (manual dispatch)"
+
+      - uses: actions/checkout@v4
+        if: ${{ github.event_name == 'workflow_run' }}
+        with:
+          # The exact commit Auto Release ran on. fetch-depth: 0 brings the
+          # tags so we can read the version tag it created at that commit.
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Find the release tag at this commit
+        id: tag
+        if: ${{ github.event_name == 'workflow_run' }}
+        run: |
+          set -euo pipefail
+          # Auto Release tags the released commit vX.Y.Z, or tags nothing for
+          # a skip-release PR or a direct push. Bind the published version to
+          # that tag so source and version always match; skip when absent.
+          TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+          if [ -z "$TAG" ]; then
+            echo "No release tag at ${{ github.event.workflow_run.head_sha }}; nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+            echo "ref=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+            echo "Publishing ${TAG}"
+          fi
+
+  binaries:
+    name: Build archives
+    needs: resolve
+    if: ${{ needs.resolve.outputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Cross-compile and package archives
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # CGO_ENABLED=0: the daemon uses no cgo, and a static binary runs on
+          # any glibc/musl base image. -X main.version is read by
+          # `mcpproxyd -version`; the other three commands have no version var,
+          # so the flag is scoped to mcpproxyd only.
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do
+            os="${target%%/*}"; arch="${target##*/}"
+            ext=""; [ "$os" = windows ] && ext=".exe"
+            stage="dist/stage_${os}_${arch}"
+            mkdir -p "$stage"
+            for cmd in mcpproxyd configcheck import-catalog mcpsmoke; do
+              ldflags="-s -w"
+              [ "$cmd" = mcpproxyd ] && ldflags="$ldflags -X main.version=v${VERSION}"
+              CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+                go build -trimpath -ldflags "$ldflags" \
+                -o "${stage}/${cmd}${ext}" "./cmd/${cmd}"
+            done
+            cp README.md config.example.yaml "$stage/"
+            cp -r examples "$stage/examples"
+            if [ "$os" = windows ]; then
+              (cd "$stage" && zip -qr "../mcpproxy_${VERSION}_${os}_${arch}.zip" .)
+            else
+              tar -czf "dist/mcpproxy_${VERSION}_${os}_${arch}.tar.gz" -C "$stage" .
+            fi
+          done
+          rm -rf dist/stage_*
+          # Bare globs (no ./ prefix): installers grep checksums.txt for the
+          # exact archive name.
+          (cd dist && sha256sum -- *.tar.gz *.zip > checksums.txt && cat checksums.txt)
+
+      - name: Smoke test the linux/amd64 build
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Prove the uploaded archive contains a runnable daemon carrying the
+          # version we claim, rather than trusting that `go build` succeeded.
+          mkdir -p smoke
+          tar -xzf "dist/mcpproxy_${VERSION}_linux_amd64.tar.gz" -C smoke
+          got=$(./smoke/mcpproxyd -version)
+          echo "$got"
+          if [ "$got" != "mcpproxyd v${VERSION}" ]; then
+            echo "::error::built binary reports '${got}', want 'mcpproxyd v${VERSION}'"
+            exit 1
+          fi
+          ./smoke/configcheck smoke/examples/01-minimal-stdio.yaml
+
+      - name: Attach archives to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          # --clobber lets a re-run replace assets instead of failing on
+          # "asset already exists". checksums.txt is consumed by installers.
+          gh release upload "$TAG" dist/*.tar.gz dist/*.zip dist/checksums.txt \
+            --clobber --repo "${{ github.repository }}"

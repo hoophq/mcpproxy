@@ -34,10 +34,20 @@ import (
 	"github.com/hoophq/mcpproxy/wal"
 )
 
+// version is the released build's tag, set by the release build with
+// -ldflags "-X main.version=vX.Y.Z". A build from source reports "dev".
+var version = "dev"
+
 func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to YAML config")
 	debug := flag.Bool("debug", false, "debug logging")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("mcpproxyd", version)
+		return
+	}
 
 	lvl := slog.LevelInfo
 	if *debug {
