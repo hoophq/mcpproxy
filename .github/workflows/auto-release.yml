@@ -23,12 +23,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # fetch-depth: 0 is load-bearing, not just for `--generate-notes`:
+          # "Compute next version" reads the local tag list to find the highest
+          # released semver. At depth 0 checkout fetches with the refspec
+          # `+refs/tags/*:refs/tags/*` and omits `--no-tags`, so every tag is
+          # present locally. Lowering this silently truncates version history.
           fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
 
       - name: Resolve merged PR and bump type
         id: pr
@@ -74,18 +79,23 @@ jobs:
         if: steps.pr.outputs.skip == 'false'
         id: version
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUMP: ${{ steps.pr.outputs.bump }}
         run: |
           set -euo pipefail
-          # Highest existing semver release, not the most recently created, so an
-          # out-of-order hotfix can't trick the bump. Go module tags must be
-          # v-prefixed (vX.Y.Z) — that is what makes `go get ...@vX.Y.Z` work.
-          LATEST=$(gh release list -L 30 --json tagName --jq '
-            [.[].tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))]
-            | sort_by(sub("^v"; "") | split(".") | map(tonumber))
-            | .[-1] // ""
-          ')
+          # Highest existing semver tag, not the most recently created release.
+          # Tags are read locally (see the checkout step) so the whole history
+          # is considered — a paged `gh release list` window can miss a high
+          # release that was created before a burst of newer backports, which
+          # would regress LATEST and re-derive an already-published NEXT.
+          #
+          # `--sort=v:refname` orders numerically (v1.10.0 > v1.9.0) and sorts
+          # prereleases below their stable release, so `tail -1` can only be a
+          # stable version. grep keeps that to canonical vX.Y.Z: Go module tags
+          # must be v-prefixed for `go get ...@vX.Y.Z`, and rejecting leading
+          # zeros keeps the arithmetic below out of bash's octal parsing.
+          LATEST=$(git tag -l --sort=v:refname 'v[0-9]*.[0-9]*.[0-9]*' \
+            | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+            | tail -n 1 || true)
           if [ -z "$LATEST" ]; then
             LATEST="v0.0.0"
           fi
@@ -99,7 +109,7 @@ jobs:
           esac
           NEXT="v${MAJOR}.${MINOR}.${PATCH}"
 
-          echo "Highest existing release: ${LATEST} -> Next: ${NEXT} (bump: ${BUMP})"
+          echo "Highest existing tag: ${LATEST} -> Next: ${NEXT} (bump: ${BUMP})"
           echo "next=${NEXT}" >> "$GITHUB_OUTPUT"
           echo "previous=${LATEST}" >> "$GITHUB_OUTPUT"
 

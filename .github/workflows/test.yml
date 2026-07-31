@@ -16,7 +16,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          # go.mod is the single source of truth for the toolchain. Its `go`
+          # directive is a full version (1.26.2), and setup-go treats a
+          # three-component spec as an exact pin rather than a 1.26.x range —
+          # so bumping the toolchain means editing go.mod, nothing here.
+          go-version-file: go.mod
       - name: Check formatting
         run: |
           out=$(gofmt -l .)
@@ -45,7 +49,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
       - run: go vet ./...
       - run: go test -race ./...
 
@@ -73,7 +77,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
       - run: go vet ./...
       - run: go build ./...
 
@@ -92,5 +96,5 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
       - run: go run ./cmd/configcheck config.example.yaml examples/*.yaml examples/remote/*.yaml
