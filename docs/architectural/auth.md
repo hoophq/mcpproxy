@@ -72,8 +72,9 @@ Design points:
   at the IdP. That removes the browser step and adds a trust
   configuration on the IdP side.
 
-Tokens and DCR registrations persist under `$MCPPROXY_STATE_DIR` (default
-`~/.mcpproxy`), encrypted with a generated keyfile.
+Tokens persist under `$MCPPROXY_STATE_DIR` (default `~/.mcpproxy`),
+encrypted with a generated keyfile. DCR registrations do not: the daemon
+leaves the client store unset, so each restart re-registers.
 
 ## Plane 3: the embedded authorization server
 
