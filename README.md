@@ -142,3 +142,33 @@ embed the gateway and supply their own implementations of:
 - `gateway.IdentityResolver`: inbound identity (skip `auth/inbound` when
   the host already authenticated the caller)
 - `gateway.Observer`: telemetry
+
+Import it the way any Go dependency is imported:
+
+```sh
+go get github.com/hoophq/mcpproxy@v0.1.0
+```
+
+## Releases
+
+Releases are cut by CI from merged PRs; nobody tags by hand. Every PR needs
+exactly one label, which `PR Release Label Check` enforces before merge:
+
+| Label | Effect on merge to `main` |
+|---|---|
+| `major` | `vX.Y.Z` → `v(X+1).0.0` |
+| `minor` | `vX.Y.Z` → `vX.(Y+1).0` |
+| `patch` | `vX.Y.Z` → `vX.Y.(Z+1)` |
+| `skip-release` | no tag, no release (docs, CI, refactors) |
+
+`Auto Release` then creates the `vX.Y.Z` tag and GitHub release — that tag
+is what `go get github.com/hoophq/mcpproxy@vX.Y.Z` resolves. `Binary Release`
+chains off it and attaches `mcpproxy_X.Y.Z_<os>_<arch>.tar.gz` (`.zip` on
+Windows) for darwin/linux/windows on amd64 and arm64, plus `checksums.txt`.
+Each archive holds all four commands, `README.md`, `config.example.yaml` and
+`examples/`. Re-publish binaries for an existing tag with the `Binary Release`
+workflow's manual trigger.
+
+Going to `v2` requires the major suffix in the module path
+(`github.com/hoophq/mcpproxy/v2`); `Auto Release` refuses to tag until
+`go.mod` matches.

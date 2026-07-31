@@ -1,0 +1,147 @@
+name: Auto Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: read
+
+# Serialize runs so two PRs merged back-to-back can't both read the same
+# "latest" tag and race on `gh release create`.
+concurrency:
+  group: auto-release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag & Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Resolve merged PR and bump type
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Ask GitHub which PR this pushed commit belongs to, rather than
+          # parsing the commit subject. This is merge-strategy agnostic (works
+          # for squash, merge-commit and rebase) and returns empty for a direct
+          # push to main, which we treat as "nothing to release".
+          PR_NUMBER=$(gh api "repos/${REPO}/commits/${SHA}/pulls" --jq '.[0].number // ""')
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No PR is associated with ${SHA} (direct push to main?). Nothing to release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          LABELS=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.labels[].name')
+
+          if echo "$LABELS" | grep -qx 'skip-release'; then
+            echo "PR #${PR_NUMBER} has 'skip-release' label — no release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BUMP=$(echo "$LABELS" | grep -E '^(major|minor|patch)$' | head -1 || true)
+          if [ -z "$BUMP" ]; then
+            echo "::error::PR #${PR_NUMBER} has no major/minor/patch/skip-release label. (PR Release Label Check should have blocked this merge.)"
+            exit 1
+          fi
+
+          echo "Merged PR: #${PR_NUMBER} (bump: ${BUMP})"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "bump=${BUMP}" >> "$GITHUB_OUTPUT"
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next version
+        if: steps.pr.outputs.skip == 'false'
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUMP: ${{ steps.pr.outputs.bump }}
+        run: |
+          set -euo pipefail
+          # Highest existing semver release, not the most recently created, so an
+          # out-of-order hotfix can't trick the bump. Go module tags must be
+          # v-prefixed (vX.Y.Z) — that is what makes `go get ...@vX.Y.Z` work.
+          LATEST=$(gh release list -L 30 --json tagName --jq '
+            [.[].tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))]
+            | sort_by(sub("^v"; "") | split(".") | map(tonumber))
+            | .[-1] // ""
+          ')
+          if [ -z "$LATEST" ]; then
+            LATEST="v0.0.0"
+          fi
+
+          CLEAN="${LATEST#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CLEAN"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          NEXT="v${MAJOR}.${MINOR}.${PATCH}"
+
+          echo "Highest existing release: ${LATEST} -> Next: ${NEXT} (bump: ${BUMP})"
+          echo "next=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "previous=${LATEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Guard the v2+ import path
+        if: steps.pr.outputs.skip == 'false'
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+        run: |
+          set -euo pipefail
+          # Go's module rules: at v2 and above the major version must be part
+          # of the module path (github.com/hoophq/mcpproxy/v2). Tagging v2.0.0
+          # against an unsuffixed go.mod produces a tag `go get` refuses to
+          # resolve, so fail here instead of publishing a broken release.
+          MAJOR="${NEXT#v}"; MAJOR="${MAJOR%%.*}"
+          WANT="github.com/${{ github.repository }}"
+          if [ "$MAJOR" -ge 2 ]; then
+            WANT="${WANT}/v${MAJOR}"
+          fi
+          GOT=$(go list -m)
+          if [ "$GOT" != "$WANT" ]; then
+            echo "::error::Releasing ${NEXT} needs module path '${WANT}', but go.mod declares '${GOT}'. Update go.mod and every internal import first."
+            exit 1
+          fi
+
+      - name: Release module
+        if: steps.pr.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT: ${{ steps.version.outputs.next }}
+          PREVIOUS: ${{ steps.version.outputs.previous }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if gh release view "$NEXT" >/dev/null 2>&1; then
+            echo "::error::Release $NEXT already exists. Another run may have created it; investigate before retrying."
+            exit 1
+          fi
+          # Creating the release also creates the vNEXT tag at $SHA. That tag is
+          # the published artifact: `go get github.com/hoophq/mcpproxy@NEXT`.
+          ARGS=(--title "$NEXT" --target "$SHA" --generate-notes)
+          if [ "$PREVIOUS" != "v0.0.0" ]; then
+            ARGS+=(--notes-start-tag "$PREVIOUS")
+          fi
+          gh release create "$NEXT" "${ARGS[@]}"
+          echo "Released github.com/${{ github.repository }}@${NEXT}"
