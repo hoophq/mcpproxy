@@ -162,6 +162,55 @@ func TestClassifyUnknownVersionNamesSupported(t *testing.T) {
 	}
 }
 
+// A Legacy client must echo the negotiated version on every request after
+// `initialize` (spec, since 2025-06-18). That header alone is not a Modern
+// signal, and treating it as one rejected the clients that follow the spec
+// most closely: claude-code negotiates 2025-11-25, echoes it as required, and
+// its very next message came back "-32022 unsupported protocol version"
+// naming 2025-11-25 as both requested and the only supported version.
+func TestClassifyLegacyEchoedVersionHeaderIsNotModern(t *testing.T) {
+	// The exact message claude-code sends after a successful handshake.
+	env, _, r := req(t, `{"method":"notifications/initialized","jsonrpc":"2.0"}`,
+		mcp.HeaderProtocolVersion, mcp.VersionLegacy,
+		sessionHeader, "cb6be304f0e1ba50511dddd353de1c5f")
+	rev, errMsg := classify(r, env)
+	if rev != mcp.RevisionLegacy || errMsg != nil {
+		t.Fatalf("got rev=%v err=%v, want legacy/nil", rev, errMsg)
+	}
+
+	// Same for an ordinary request, which additionally carries no Mcp-Method
+	// header — the Modern arm would have demanded one.
+	env, _, r = req(t, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+		mcp.HeaderProtocolVersion, mcp.VersionLegacy)
+	if rev, errMsg := classify(r, env); rev != mcp.RevisionLegacy || errMsg != nil {
+		t.Fatalf("got rev=%v err=%v, want legacy/nil", rev, errMsg)
+	}
+}
+
+// The header still cannot smuggle in a revision nobody serves. A Legacy-shaped
+// request echoing an unknown version is refused, but for the honest reason.
+func TestClassifyLegacyEchoedUnknownVersionRefused(t *testing.T) {
+	env, _, r := req(t, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+		mcp.HeaderProtocolVersion, "2099-01-01")
+	_, errMsg := classify(r, env)
+	if errMsg == nil || errMsg.Error.Code != mcp.CodeUnsupportedProtocolVersion {
+		t.Fatalf("got %v, want -32022", errMsg)
+	}
+}
+
+// Only _meta puts a request on the Modern path. A header-only Modern claim is
+// a Legacy client echoing a version it negotiated, not a stateless request:
+// it carries none of the per-request metadata the Modern arm reads.
+func TestClassifyModernRequiresMetaNotJustHeader(t *testing.T) {
+	env, _, r := req(t, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+		mcp.HeaderProtocolVersion, mcp.VersionModern,
+		mcp.HeaderMethod, "tools/list")
+	rev, errMsg := classify(r, env)
+	if rev != mcp.RevisionLegacy || errMsg != nil {
+		t.Fatalf("got rev=%v err=%v, want legacy/nil", rev, errMsg)
+	}
+}
+
 func TestRefuseModernNamesBlockers(t *testing.T) {
 	// The refusal must be actionable: an operator reading the response needs
 	// to know which controls are keeping the gateway on the Legacy path.

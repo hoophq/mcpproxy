@@ -151,6 +151,16 @@ func (b *SSEBackend) Start(ctx context.Context) error {
 	if resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		cancel()
+		// 405 on the GET stream is the signature of a streamable-http
+		// endpoint: that transport serves MCP on POST and the spec lets it
+		// refuse the optional GET stream outright. Without naming the fix
+		// the operator sees only the server's "use POST" text relayed
+		// through a 502, which reads like a gateway bug rather than a
+		// one-word connection setting.
+		if resp.StatusCode == http.StatusMethodNotAllowed {
+			return fmt.Errorf("sse backend %s: stream http 405: %s; endpoint speaks streamable-http, set transport: streamable-http",
+				b.name, readExcerpt(resp.Body))
+		}
 		return fmt.Errorf("sse backend %s: stream http %d: %s", b.name, resp.StatusCode, readExcerpt(resp.Body))
 	}
 	if mt := mediaType(resp.Header.Get("Content-Type")); mt != "text/event-stream" {

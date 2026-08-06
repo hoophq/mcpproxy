@@ -263,6 +263,27 @@ func TestSSEWrongContentTypeRejected(t *testing.T) {
 	}
 }
 
+// A streamable-http endpoint refuses the SSE transport's GET stream with 405.
+// Linear does exactly this, and the bare relayed message ("Method not allowed.
+// Use POST for MCP requests.") reaches the operator as a 502 that names no
+// fix. The error must say which setting to change, as the content-type
+// mismatch above already does.
+func TestSSEMethodNotAllowedHintsStreamableHTTP(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		fmt.Fprint(w, `{"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not allowed. Use POST for MCP requests."},"id":null}`)
+	}))
+	defer srv.Close()
+
+	b := NewSSE("test", config.Backend{Transport: "sse", URL: srv.URL}, nil)
+	err := b.Start(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "streamable-http") {
+		t.Fatalf("expected 405 to hint at streamable-http, got: %v", err)
+	}
+}
+
 func TestSSEUnauthorizedSurfacesChallenge(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
