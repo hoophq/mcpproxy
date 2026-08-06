@@ -27,31 +27,42 @@ func classify(r *http.Request, env *jsonrpc.Message) (mcp.Revision, *jsonrpc.Mes
 	meta := mcp.ParseMeta(env.Params)
 	header := r.Header.Get(mcp.HeaderProtocolVersion)
 
-	// Neither the header nor _meta claims a revision: a Legacy client, which
-	// never sent either. Note a Legacy client cannot reach the Modern arm by
-	// accident, so this branch stays the common path.
-	if !meta.HasModernSignal() && header == "" {
+	// MCP-Protocol-Version is not a Modern invention. Since 2025-06-18 the
+	// spec requires a Legacy client to echo the version it negotiated at
+	// `initialize` on every subsequent HTTP request, so the header alone
+	// says nothing about the era — only _meta does. Reading the header as a
+	// Modern signal rejected the very clients that follow the spec most
+	// closely: claude-code negotiates 2025-11-25, echoes it as required, and
+	// its next message (notifications/initialized) came back
+	// "-32022 unsupported protocol version" naming 2025-11-25 as both the
+	// requested and the only supported version.
+	//
+	// So the era is decided by _meta, and the header is only cross-checked
+	// against it.
+	if !meta.HasModernSignal() {
+		if header != "" && header != mcp.VersionLegacy && header != mcp.VersionModern {
+			// A Legacy-shaped request echoing a version this gateway does
+			// not speak. Still worth refusing, but for the right reason.
+			return mcp.RevisionLegacy, unsupportedVersion(env.ID, header)
+		}
 		return mcp.RevisionLegacy, nil
 	}
 
-	// One of the two claims a revision. From here a disagreement is an error
-	// rather than a silent downgrade: a client that mirrors its version into
-	// a header and then contradicts it in the body is exactly the split-brain
-	// the spec's header validation exists to catch.
-	if header != "" && meta.ProtocolVersion != "" && header != meta.ProtocolVersion {
+	// _meta claims a revision. From here a disagreement with the mirrored
+	// header is an error rather than a silent downgrade: a client that
+	// mirrors its version into a header and then contradicts it in the body
+	// is exactly the split-brain the spec's header validation exists to
+	// catch.
+	if header != "" && header != meta.ProtocolVersion {
 		return mcp.RevisionLegacy, headerMismatch(env.ID,
 			fmt.Sprintf("%s header %q does not match _meta protocolVersion %q",
 				mcp.HeaderProtocolVersion, header, meta.ProtocolVersion))
 	}
 
-	claimed := meta.ProtocolVersion
-	if claimed == "" {
-		claimed = header
-	}
-	if claimed != mcp.VersionModern {
+	if meta.ProtocolVersion != mcp.VersionModern {
 		// A version the gateway does not serve. Naming what it does serve is
 		// what lets a dual-era client retry instead of failing outright.
-		return mcp.RevisionLegacy, unsupportedVersion(env.ID, claimed)
+		return mcp.RevisionLegacy, unsupportedVersion(env.ID, meta.ProtocolVersion)
 	}
 
 	if msg := validateModernHeaders(r, env); msg != nil {
