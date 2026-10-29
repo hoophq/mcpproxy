@@ -154,7 +154,10 @@ func (c *conn) dispatchFromBackend(bc *backendConn, raw []byte) {
 const s2cQueue = 64
 
 // dropReplyTimeout bounds the error reply sent to a server whose request
-// was dropped, so a backend slow to accept it cannot hold anything up.
+// was dropped, so a remote backend slow to accept it cannot hold anything
+// up. A stdio backend's Send ignores the deadline and waits on the child's
+// stdin; Close ends that wait. Session DELETE and Close wait for replies
+// still in flight, at most this long.
 const dropReplyTimeout = 5 * time.Second
 
 type s2cMsg struct {

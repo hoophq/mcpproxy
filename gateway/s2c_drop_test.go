@@ -141,8 +141,9 @@ func readSSE(url, sid string, d time.Duration) ([]string, error) {
 	return out, nil
 }
 
-// The oldest server requests a full queue drops are answered with -32603 so
-// the server stops waiting, and the session audits the first drop once.
+// The oldest server requests a full queue drops are answered with -32603, in
+// any order, so the server stops waiting; the session audits the first drop
+// once.
 func TestDroppedServerRequestGetsErrorReply(t *testing.T) {
 	sink := &s2cSink{}
 	bes, front := newFakeGateway(t, sink, "main")
@@ -166,9 +167,10 @@ func TestDroppedServerRequestGetsErrorReply(t *testing.T) {
 			t.Fatalf("got %d error replies in 2s, want 6: %v", len(got), got)
 		}
 	}
+	all := strings.Join(got, "\n")
 	for i := 1; i <= 6; i++ {
-		if !strings.Contains(got[i-1], fmt.Sprintf(`"id":"s%d"`, i)) {
-			t.Fatalf("reply %d does not answer s%d: %s", i, i, got[i-1])
+		if !strings.Contains(all, fmt.Sprintf(`"id":"s%d"`, i)) {
+			t.Fatalf("no reply answers s%d: %v", i, got)
 		}
 	}
 	select {
