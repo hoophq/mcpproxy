@@ -41,19 +41,17 @@ func (g *Gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized: "+err.Error(), http.StatusUnauthorized)
 		return
 	}
+	if identity.Subject == "" {
+		identity.Subject = "anonymous"
+	}
 	switch r.Method {
 	case http.MethodPost:
 		g.handlePost(w, r, identity)
 	case http.MethodGet:
 		g.handleSSE(w, r, identity)
 	case http.MethodDelete:
-		if sid := r.Header.Get(sessionHeader); sid != "" {
-			if c := g.sessionFor(sid, identity); c != nil {
-				g.dropSession(sid)
-			} else if g.getSession(sid) != nil {
-				http.Error(w, "unknown session", http.StatusNotFound)
-				return
-			}
+		if sid := r.Header.Get(sessionHeader); sid != "" && g.sessionFor(sid, identity) != nil {
+			g.dropSession(sid)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
@@ -63,7 +61,9 @@ func (g *Gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 
 // sessionFor returns the session sid when identity opened it. Another caller
 // gets nil, as for an unknown id: the id alone must not let anyone use or
-// end a session, and the refusal is audited.
+// end a session, and the refusal is audited. Callers the resolver cannot
+// tell apart share one identity and so share sessions; binding them needs
+// inbound auth.
 func (g *Gateway) sessionFor(sid string, identity inspect.Identity) *conn {
 	c := g.getSession(sid)
 	if c == nil || sameCaller(c.state.Identity(), identity) {

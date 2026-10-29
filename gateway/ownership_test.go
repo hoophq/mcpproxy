@@ -69,7 +69,8 @@ func call(t *testing.T, url, method, user, sid, body string) (int, string, strin
 }
 
 // A session belongs to the caller that opened it. Another caller with the id
-// gets 404 on POST, GET and DELETE, and the owner keeps working.
+// gets 404 on POST and GET, a DELETE that ends nothing, and the owner keeps
+// working.
 func TestSessionIsBoundToItsOpener(t *testing.T) {
 	srv := testmcp.New()
 	hs := httptest.NewServer(srv.HTTPHandler())
@@ -106,8 +107,8 @@ func TestSessionIsBoundToItsOpener(t *testing.T) {
 	if code, _, body := call(t, front.URL, http.MethodGet, "mallory", sid, ""); code != http.StatusNotFound {
 		t.Fatalf("mallory GET on alice's session: %d %s, want 404", code, body)
 	}
-	if code, _, body := call(t, front.URL, http.MethodDelete, "mallory", sid, ""); code != http.StatusNotFound {
-		t.Fatalf("mallory DELETE on alice's session: %d %s, want 404", code, body)
+	if code, _, body := call(t, front.URL, http.MethodDelete, "mallory", sid, ""); code != http.StatusNoContent {
+		t.Fatalf("mallory DELETE on alice's session: %d %s, want 204 and no effect", code, body)
 	}
 	if n := rec.count(audit.EventSessionRefused); n != 3 {
 		t.Fatalf("session_refused events = %d, want 3", n)

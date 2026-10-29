@@ -100,12 +100,18 @@ checklist;
 |---|---|
 | `POST /mcp` | one JSON-RPC message (initialize starts a session; later messages carry the `Mcp-Session-Id` header) |
 | `GET /mcp` | SSE stream of server-initiated messages for the session |
-| `DELETE /mcp` | end the session |
+| `DELETE /mcp` | end the session; another caller's DELETE ends nothing |
 | `GET /approvals/` | pending held tool calls (bearer: `approvals.api_token`) |
 | `POST /approvals/{id}/approve` \| `/reject` | resolve a held call |
 | `GET /healthz` | liveness |
 | `GET /metrics` | Prometheus (when `telemetry.prometheus_path` set) |
 | `/.well-known/*`, `/authorize`, `/token`, `/register`, `/callback` | embedded auth server (when `auth_server` set) |
+
+A session belongs to the caller that opened it: another caller's POST or GET
+answers 404, its DELETE ends nothing, and the refusal is audited as
+`mcp.session_refused`. With `inbound.mode: anonymous` every caller is
+`anonymous` and shares sessions, so a listener that more than one caller can
+reach needs inbound auth.
 
 ## Protocol revisions
 
