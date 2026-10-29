@@ -30,6 +30,7 @@ const (
 	EventGuardrailBlock   EventType = "mcp.guardrail_block"
 	EventSessionKilled    EventType = "mcp.session_killed"
 	EventError            EventType = "mcp.error"
+	EventSessionRefused   EventType = "mcp.session_refused"
 )
 
 // Event is one structured audit record.

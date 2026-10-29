@@ -45,15 +45,41 @@ func (g *Gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		g.handlePost(w, r, identity)
 	case http.MethodGet:
-		g.handleSSE(w, r)
+		g.handleSSE(w, r, identity)
 	case http.MethodDelete:
 		if sid := r.Header.Get(sessionHeader); sid != "" {
-			g.dropSession(sid)
+			if c := g.sessionFor(sid, identity); c != nil {
+				g.dropSession(sid)
+			} else if g.getSession(sid) != nil {
+				http.Error(w, "unknown session", http.StatusNotFound)
+				return
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// sessionFor returns the session sid when identity opened it. Another caller
+// gets nil, as for an unknown id: the id alone must not let anyone use or
+// end a session, and the refusal is audited.
+func (g *Gateway) sessionFor(sid string, identity inspect.Identity) *conn {
+	c := g.getSession(sid)
+	if c == nil || sameCaller(c.state.Identity(), identity) {
+		return c
+	}
+	g.log.Warn("session used by another caller", "sid", sid,
+		"owner", c.state.Identity().Subject, "caller", identity.Subject)
+	g.sink.Emit(context.Background(), audit.Event{
+		Time: time.Now(), Type: audit.EventSessionRefused, Session: sid,
+		User: identity.Subject, Reason: "session opened by another caller",
+	})
+	return nil
+}
+
+func sameCaller(a, b inspect.Identity) bool {
+	return a.Subject == b.Subject && a.Email == b.Email
 }
 
 // handlePost processes one client JSON-RPC message.
@@ -96,7 +122,7 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 			http.Error(w, "missing "+sessionHeader, http.StatusBadRequest)
 			return
 		}
-		c = g.getSession(sid)
+		c = g.sessionFor(sid, identity)
 		if c == nil {
 			http.Error(w, "unknown session", http.StatusNotFound)
 			return
@@ -296,13 +322,13 @@ func (c *conn) auditToolResult(ctx context.Context, backendName, tool string, re
 }
 
 // handleSSE serves the S2C stream (server-initiated requests/notifications).
-func (g *Gateway) handleSSE(w http.ResponseWriter, r *http.Request) {
+func (g *Gateway) handleSSE(w http.ResponseWriter, r *http.Request, identity inspect.Identity) {
 	sid := r.Header.Get(sessionHeader)
 	if sid == "" {
 		http.Error(w, "missing "+sessionHeader, http.StatusBadRequest)
 		return
 	}
-	c := g.getSession(sid)
+	c := g.sessionFor(sid, identity)
 	if c == nil {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
