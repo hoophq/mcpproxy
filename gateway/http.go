@@ -78,8 +78,10 @@ func (g *Gateway) sessionFor(sid string, identity inspect.Identity) *conn {
 	return nil
 }
 
+// sameCaller compares the subject only: a resolver can re-read a changed
+// email during a session (GitHub, OIDC); the subject does not change.
 func sameCaller(a, b inspect.Identity) bool {
-	return a.Subject == b.Subject && a.Email == b.Email
+	return a.Subject == b.Subject
 }
 
 // handlePost processes one client JSON-RPC message.

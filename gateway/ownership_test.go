@@ -124,3 +124,60 @@ func TestSessionIsBoundToItsOpener(t *testing.T) {
 		t.Fatalf("alice after her DELETE: %d, want 404", code)
 	}
 }
+
+// callAs is call with an email the resolver reads from X-Email.
+func callAs(t *testing.T, url, method, user, email, sid, body string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequestWithContext(context.Background(), method, url+"/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User", user)
+	req.Header.Set("X-Email", email)
+	if sid != "" {
+		req.Header.Set("Mcp-Session-Id", sid)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s as %s: %v", method, user, err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.ReadAll(resp.Body)
+	return resp.StatusCode, resp.Header.Get("Mcp-Session-Id")
+}
+
+// The subject owns the session, not the email: a resolver that re-reads a
+// changed email must not lock the owner out.
+func TestSessionSurvivesAnEmailChange(t *testing.T) {
+	srv := testmcp.New()
+	hs := httptest.NewServer(srv.HTTPHandler())
+	defer hs.Close()
+	gw, err := gateway.New(gateway.Options{
+		Backends: map[string]backend.Factory{
+			"main": backend.NewFactory("main", config.Backend{Transport: "streamable-http", URL: hs.URL}, nil),
+		},
+		Pipeline: checks.Assemble(config.Policy{}, inspect.Hooks{}, audit.Discard, false),
+		Resolver: func(r *http.Request) (inspect.Identity, error) {
+			return inspect.Identity{Subject: r.Header.Get("X-User"), Email: r.Header.Get("X-Email")}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+	defer gw.Close()
+	front := httptest.NewServer(gw.Handler())
+	defer front.Close()
+	const initialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"t","version":"0"},"capabilities":{}}}`
+	const list = `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`
+	code, sid := callAs(t, front.URL, http.MethodPost, "alice", "alice@old.example", "", initialize)
+	if code != 200 || sid == "" {
+		t.Fatalf("initialize: %d", code)
+	}
+	if code, _ := callAs(t, front.URL, http.MethodPost, "alice", "alice@new.example", sid, list); code != 200 {
+		t.Fatalf("POST after an email change: %d, want 200", code)
+	}
+	if code, _ := callAs(t, front.URL, http.MethodDelete, "alice", "alice@new.example", sid, ""); code != http.StatusNoContent {
+		t.Fatalf("DELETE after an email change: %d", code)
+	}
+	if code, _ := callAs(t, front.URL, http.MethodPost, "alice", "alice@new.example", sid, list); code != http.StatusNotFound {
+		t.Fatalf("POST after DELETE: %d, want 404", code)
+	}
+}
