@@ -90,9 +90,10 @@ func (b *Budget) admitCall(ctx context.Context, s inspect.Session, m *inspect.Ms
 	if !ok {
 		return inspect.AllowAll
 	}
-	now := b.now()
 	w := s.Meta(metaKeyWindows, func() any { return &rateWindows{m: map[string][]time.Time{}} }).(*rateWindows)
 	w.mu.Lock()
+	// Stamp the hit under the lock: a time read before a wait would expire early.
+	now := b.now()
 	hits := prune(w.m[tool], now.Add(-rateWindow))
 	denied := len(hits) >= limit
 	if denied {
