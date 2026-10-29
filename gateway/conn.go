@@ -153,6 +153,10 @@ func (c *conn) dispatchFromBackend(bc *backendConn, raw []byte) {
 // stream before the oldest is dropped.
 const s2cQueue = 64
 
+// dropReplyTimeout bounds the error reply sent to a server whose request
+// was dropped, so a backend slow to accept it cannot hold anything up.
+const dropReplyTimeout = 5 * time.Second
+
 type s2cMsg struct {
 	raw []byte
 	bc  *backendConn
@@ -187,13 +191,18 @@ func (c *conn) enqueueS2C(bc *backendConn, raw []byte) {
 }
 
 // dropS2C answers a dropped server request with an error, so the server stops
-// waiting, and audits the first drop of the session.
+// waiting, and audits the first drop of the session. The reply goes out off
+// the pump, with a deadline: the pump must never wait on a backend.
 func (c *conn) dropS2C(m s2cMsg) {
 	ctx := context.Background()
 	if env, err := jsonrpc.Parse(m.raw); err == nil && env.IsRequest() {
 		reply := jsonrpc.NewError(env.ID, jsonrpc.CodeInternalError, "client has no stream open for server requests")
 		if rb, err := reply.Marshal(); err == nil {
-			_ = m.bc.b.Send(ctx, rb)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), dropReplyTimeout)
+				defer cancel()
+				_ = m.bc.b.Send(ctx, rb)
+			}()
 		}
 	}
 	if c.dropped.Add(1) == 1 {
