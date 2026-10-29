@@ -68,10 +68,12 @@ func classify(r *http.Request, env *jsonrpc.Message) (mcp.Revision, *jsonrpc.Mes
 }
 
 // checkEchoedVersion refuses a Legacy request whose MCP-Protocol-Version
-// header names a version other than the one its session negotiated.
+// header names a version other than the one its session negotiated. A
+// session that negotiated nothing, because its backend never answered
+// initialize, matches no header.
 func checkEchoedVersion(r *http.Request, env *jsonrpc.Message, negotiated string) *jsonrpc.Message {
 	header := r.Header.Get(mcp.HeaderProtocolVersion)
-	if header == "" || negotiated == "" || header == negotiated {
+	if header == "" || header == negotiated {
 		return nil
 	}
 	return unsupportedVersion(env.ID, header, negotiated)
@@ -127,13 +129,17 @@ func headerMismatch(id jsonrpc.ID, reason string) *jsonrpc.Message {
 
 // unsupportedVersion refuses a revision and names the one the gateway serves
 // here, so a dual-era client can retry rather than give up.
-func unsupportedVersion(id jsonrpc.ID, requested, supported string) *jsonrpc.Message {
+func unsupportedVersion(id jsonrpc.ID, requested, serves string) *jsonrpc.Message {
 	msg := jsonrpc.NewError(id, mcp.CodeUnsupportedProtocolVersion, "unsupported protocol version")
+	supported := []string{}
+	if serves != "" {
+		supported = append(supported, serves)
+	}
 	data, err := json.Marshal(struct {
 		Supported []string `json:"supported"`
 		Requested string   `json:"requested,omitempty"`
 	}{
-		Supported: []string{supported},
+		Supported: supported,
 		Requested: requested,
 	})
 	if err == nil {

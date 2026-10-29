@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -206,7 +207,8 @@ func TestCheckEchoedVersion(t *testing.T) {
 		{"no header", "", "2025-06-18", false},
 		{"differs", "2025-11-25", "2025-06-18", true},
 		{"unknown version", "2099-01-01", "2025-06-18", true},
-		{"nothing negotiated", "2099-01-01", "", false},
+		{"nothing negotiated", "2099-01-01", "", true},
+		{"nothing negotiated, no header", "", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -229,8 +231,12 @@ func TestCheckEchoedVersion(t *testing.T) {
 			if err := json.Unmarshal(msg.Error.Data, &data); err != nil {
 				t.Fatalf("error data: %v", err)
 			}
-			if len(data.Supported) != 1 || data.Supported[0] != tc.negotiated || data.Requested != tc.header {
-				t.Errorf("data = %+v, want supported [%s] requested %s", data, tc.negotiated, tc.header)
+			want := []string{}
+			if tc.negotiated != "" {
+				want = append(want, tc.negotiated)
+			}
+			if !slices.Equal(data.Supported, want) || data.Requested != tc.header {
+				t.Errorf("data = %+v, want supported %v requested %s", data, want, tc.header)
 			}
 		})
 	}
