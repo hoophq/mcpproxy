@@ -201,9 +201,10 @@ func callKeyed(t *testing.T, url, method, user, key, sid, body string) (int, str
 	return resp.StatusCode, resp.Header.Get("Mcp-Session-Id")
 }
 
-// The account key owns the session, not the login: a renamed opener keeps
-// it, and another account that takes the old login does not get it.
-func TestSessionFollowsTheAccountKeyNotTheLogin(t *testing.T) {
+// A session is bound to the login and the account key it was opened with:
+// a renamed login starts a new session, and another account that takes the
+// old login does not get the old one. One session, one login in the audit.
+func TestARenamedOrReclaimedLoginDoesNotKeepTheSession(t *testing.T) {
 	srv := testmcp.New()
 	hs := httptest.NewServer(srv.HTTPHandler())
 	defer hs.Close()
@@ -228,8 +229,8 @@ func TestSessionFollowsTheAccountKeyNotTheLogin(t *testing.T) {
 	if code != 200 || sid == "" {
 		t.Fatalf("initialize: %d", code)
 	}
-	if code, _ := callKeyed(t, front.URL, http.MethodPost, "alice-renamed", "1001", sid, list); code != 200 {
-		t.Fatalf("the renamed opener: %d, want 200", code)
+	if code, _ := callKeyed(t, front.URL, http.MethodPost, "alice-renamed", "1001", sid, list); code != http.StatusNotFound {
+		t.Fatalf("the renamed login on the old session: %d, want 404", code)
 	}
 	if code, _ := callKeyed(t, front.URL, http.MethodPost, "alice", "2002", sid, list); code != http.StatusNotFound {
 		t.Fatalf("another account with the old login: %d, want 404", code)
@@ -237,7 +238,10 @@ func TestSessionFollowsTheAccountKeyNotTheLogin(t *testing.T) {
 	if code, _ := callKeyed(t, front.URL, http.MethodDelete, "alice", "2002", sid, ""); code != http.StatusNoContent {
 		t.Fatalf("DELETE by another account: %d", code)
 	}
-	if code, _ := callKeyed(t, front.URL, http.MethodPost, "alice-renamed", "1001", sid, list); code != 200 {
+	if code, _ := callKeyed(t, front.URL, http.MethodPost, "alice", "1001", sid, list); code != 200 {
 		t.Fatalf("the opener after a foreign DELETE: %d, want 200 (it ended nothing)", code)
+	}
+	if code, sid2 := callKeyed(t, front.URL, http.MethodPost, "alice-renamed", "1001", "", initialize); code != 200 || sid2 == "" || sid2 == sid {
+		t.Fatalf("the renamed login starting over: %d sid=%q", code, sid2)
 	}
 }

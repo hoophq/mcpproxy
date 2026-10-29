@@ -78,18 +78,13 @@ func (g *Gateway) sessionFor(sid string, identity inspect.Identity) *conn {
 	return nil
 }
 
-// sameCaller compares the key of the account: Key when the resolver sets
-// one (a GitHub login can be renamed and reclaimed, its id cannot), else
-// the subject. An email can change during a session and is not a key.
+// sameCaller compares the subject and, when the resolver sets one, the
+// stable key of the account (a GitHub login can be renamed and reclaimed,
+// its id cannot). A caller whose login or key changed starts a new session,
+// so one session is always audited under one login. An email can change
+// during a session and is not compared.
 func sameCaller(a, b inspect.Identity) bool {
-	return callerKey(a) == callerKey(b)
-}
-
-func callerKey(id inspect.Identity) string {
-	if id.Key != "" {
-		return "key:" + id.Key
-	}
-	return "sub:" + id.Subject
+	return a.Subject == b.Subject && a.Key == b.Key
 }
 
 // handlePost processes one client JSON-RPC message.

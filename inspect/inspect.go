@@ -81,9 +81,9 @@ type Check interface {
 type Identity struct {
 	Subject string
 	Email   string
-	// Key is the stable key of the account when Subject is not one: a
+	// Key is the stable key of the account when Subject alone is not one: a
 	// GitHub login can be renamed and reclaimed, so that resolver sets the
-	// numeric id here. Empty means Subject is the key.
+	// numeric id here. A session is bound to the subject and the key.
 	Key    string
 	Claims map[string]any
 }
