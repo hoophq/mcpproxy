@@ -187,14 +187,52 @@ func TestClassifyLegacyEchoedVersionHeaderIsNotModern(t *testing.T) {
 	}
 }
 
-// The header still cannot smuggle in a revision nobody serves. A Legacy-shaped
-// request echoing an unknown version is refused, but for the honest reason.
-func TestClassifyLegacyEchoedUnknownVersionRefused(t *testing.T) {
+// A Legacy request's header is judged against its session, not by classify:
+// the version a client echoes is whatever the backend negotiated.
+func TestClassifyLegacyEchoedUnknownVersionIsNotRefusedHere(t *testing.T) {
 	env, _, r := req(t, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
 		mcp.HeaderProtocolVersion, "2099-01-01")
-	_, errMsg := classify(r, env)
-	if errMsg == nil || errMsg.Error.Code != mcp.CodeUnsupportedProtocolVersion {
-		t.Fatalf("got %v, want -32022", errMsg)
+	if rev, errMsg := classify(r, env); rev != mcp.RevisionLegacy || errMsg != nil {
+		t.Fatalf("got rev=%v err=%v, want legacy/nil", rev, errMsg)
+	}
+}
+
+func TestCheckEchoedVersion(t *testing.T) {
+	cases := []struct {
+		name, header, negotiated string
+		refused                  bool
+	}{
+		{"matches", "2025-06-18", "2025-06-18", false},
+		{"no header", "", "2025-06-18", false},
+		{"differs", "2025-11-25", "2025-06-18", true},
+		{"unknown version", "2099-01-01", "2025-06-18", true},
+		{"nothing negotiated", "2099-01-01", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, _, r := req(t, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+				mcp.HeaderProtocolVersion, tc.header)
+			msg := checkEchoedVersion(r, env, tc.negotiated)
+			if (msg != nil) != tc.refused {
+				t.Fatalf("got %v, want refused=%v", msg, tc.refused)
+			}
+			if msg == nil {
+				return
+			}
+			if msg.Error.Code != mcp.CodeUnsupportedProtocolVersion {
+				t.Fatalf("code = %d, want -32022", msg.Error.Code)
+			}
+			var data struct {
+				Supported []string `json:"supported"`
+				Requested string   `json:"requested"`
+			}
+			if err := json.Unmarshal(msg.Error.Data, &data); err != nil {
+				t.Fatalf("error data: %v", err)
+			}
+			if len(data.Supported) != 1 || data.Supported[0] != tc.negotiated || data.Requested != tc.header {
+				t.Errorf("data = %+v, want supported [%s] requested %s", data, tc.negotiated, tc.header)
+			}
+		})
 	}
 }
 

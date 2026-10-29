@@ -310,6 +310,9 @@ func (c *conn) fanoutInitialize(ctx context.Context, env *jsonrpc.Message) (*jso
 		var res mcp.InitializeResult
 		if err := json.Unmarshal(resp.Result, &res); err == nil {
 			c.state.ServerInfo[name] = res.ServerInfo
+			if first == nil {
+				c.state.SetProtocolVersion(res.ProtocolVersion)
+			}
 		}
 		if first == nil {
 			first = resp
