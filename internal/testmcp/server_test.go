@@ -54,8 +54,8 @@ func TestInitializeAndInitializedNotification(t *testing.T) {
 func TestToolsListReflectsSetTools(t *testing.T) {
 	s := New()
 	names := listToolNames(t, s)
-	if len(names) != 3 {
-		t.Fatalf("default catalog = %v, want 3 tools", names)
+	if len(names) != 4 {
+		t.Fatalf("default catalog = %v, want 4 tools", names)
 	}
 
 	s.SetTools([]mcp.Tool{{Name: "only", Description: "d"}})

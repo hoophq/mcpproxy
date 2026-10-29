@@ -187,7 +187,7 @@ func (g *Gateway) startSession(ctx context.Context, identity inspect.Identity) (
 		g:        g,
 		state:    st,
 		backends: map[string]*backendConn{},
-		s2c:      make(chan []byte, 64),
+		s2c:      make(chan s2cMsg, s2cQueue),
 		done:     make(chan struct{}),
 	}
 	c.touch()

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hoophq/mcpproxy/audit"
@@ -57,8 +58,9 @@ type conn struct {
 	backends map[string]*backendConn
 
 	// s2c carries server-initiated messages (requests, notifications)
-	// toward the client's SSE stream.
-	s2c chan []byte
+	// toward the client's SSE stream. See enqueueS2C.
+	s2c     chan s2cMsg
+	dropped atomic.Int64
 
 	mu       sync.Mutex
 	last     time.Time
@@ -144,10 +146,63 @@ func (c *conn) dispatchFromBackend(bc *backendConn, raw []byte) {
 	if !ok {
 		return // denied; error already sent back to backend if request
 	}
+	c.enqueueS2C(bc, out)
+}
+
+// s2cQueue is how many server-initiated messages wait for the client's GET
+// stream before the oldest is dropped.
+const s2cQueue = 64
+
+type s2cMsg struct {
+	raw []byte
+	bc  *backendConn
+}
+
+// enqueueS2C hands a server-initiated message to the client's GET stream and
+// never blocks the pump: a full queue drops its oldest message, so a session
+// with no stream open still receives its responses.
+func (c *conn) enqueueS2C(bc *backendConn, raw []byte) {
+	msg := s2cMsg{raw: raw, bc: bc}
 	select {
-	case c.s2c <- out:
+	case c.s2c <- msg:
+		return
 	case <-c.done:
+		return
+	default:
 	}
+	var dropped []s2cMsg
+	select {
+	case old := <-c.s2c:
+		dropped = append(dropped, old)
+	default:
+	}
+	select {
+	case c.s2c <- msg:
+	default:
+		dropped = append(dropped, msg)
+	}
+	for _, d := range dropped {
+		c.dropS2C(d)
+	}
+}
+
+// dropS2C answers a dropped server request with an error, so the server stops
+// waiting, and audits the first drop of the session.
+func (c *conn) dropS2C(m s2cMsg) {
+	ctx := context.Background()
+	if env, err := jsonrpc.Parse(m.raw); err == nil && env.IsRequest() {
+		reply := jsonrpc.NewError(env.ID, jsonrpc.CodeInternalError, "client has no stream open for server requests")
+		if rb, err := reply.Marshal(); err == nil {
+			_ = m.bc.b.Send(ctx, rb)
+		}
+	}
+	if c.dropped.Add(1) == 1 {
+		c.g.sink.Emit(ctx, audit.Event{
+			Time: time.Now(), Type: audit.EventError, Session: c.state.ID(),
+			Backend: m.bc.name, Reason: "server-to-client queue full with no stream draining it; dropping the oldest messages",
+		})
+	}
+	c.g.log.Debug("dropped server-to-client message", "sid", c.state.ID(), "backend", m.bc.name)
 }
 
 // inspectS2C runs the pipeline on a server-initiated message. Returns the
