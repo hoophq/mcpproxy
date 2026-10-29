@@ -25,6 +25,7 @@ type backendConn struct {
 
 	mu      sync.Mutex
 	waiters map[string]chan []byte // id key → response delivery
+	replies chan struct{}          // drop replies in flight, see dropS2C
 }
 
 func (bc *backendConn) addWaiter(key string) chan []byte {
@@ -62,7 +63,6 @@ type conn struct {
 	s2c     chan s2cMsg
 	s2cMu   sync.Mutex // serializes evict and insert across backend pumps
 	dropped atomic.Int64
-	replies chan struct{} // drop replies in flight, see dropS2C
 
 	mu       sync.Mutex
 	last     time.Time
@@ -162,8 +162,9 @@ const s2cQueue = 64
 // still in flight, at most this long.
 const dropReplyTimeout = 5 * time.Second
 
-// dropReplyLimit caps the replies in flight per session, so a backend that
-// floods server requests and never accepts replies cannot pile up goroutines.
+// dropReplyLimit caps the replies in flight per backend, so one that floods
+// server requests and never accepts replies cannot pile up goroutines or
+// hold the slots of another backend.
 const dropReplyLimit = 8
 
 type s2cMsg struct {
@@ -216,9 +217,9 @@ func (c *conn) dropS2C(m s2cMsg) {
 		reply := jsonrpc.NewError(env.ID, jsonrpc.CodeInternalError, "client has no stream open for server requests")
 		if rb, err := reply.Marshal(); err == nil {
 			select {
-			case c.replies <- struct{}{}:
+			case m.bc.replies <- struct{}{}:
 				go func() {
-					defer func() { <-c.replies }()
+					defer func() { <-m.bc.replies }()
 					ctx, cancel := context.WithTimeout(context.Background(), dropReplyTimeout)
 					defer cancel()
 					_ = m.bc.b.Send(ctx, rb)

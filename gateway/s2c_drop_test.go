@@ -304,7 +304,7 @@ func TestDropReplyDoesNotDelayTheResult(t *testing.T) {
 }
 
 // A backend that accepts no reply holds at most dropReplyLimit reply
-// goroutines per session; the rest are skipped and tool calls go on.
+// goroutines per backend; the rest are skipped and tool calls go on.
 func TestDropRepliesAreBounded(t *testing.T) {
 	bes, front := newFakeGateway(t, audit.Discard, "main")
 	c := &tclient{t: t, url: front.URL}
@@ -380,6 +380,33 @@ func TestConcurrentPumpsKeepDropOldestOrder(t *testing.T) {
 		}
 		if last := nums[len(nums)-1]; last != n {
 			t.Fatalf("%s kept %v: its newest message %d was dropped", name, nums, n)
+		}
+	}
+}
+
+// In aggregation, a backend that accepts no reply holds only its own slots:
+// the dropped requests of another backend are still answered.
+func TestOneBackendCannotStarveAnothersReplies(t *testing.T) {
+	bes, front := newFakeGateway(t, audit.Discard, "a", "b")
+	c := &tclient{t: t, url: front.URL}
+	c.initialize()
+	a, b := bes["a"], bes["b"]
+	a.hold = make(chan struct{})
+	defer close(a.hold)
+	for i := 1; i <= 100; i++ {
+		a.recv <- []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":"a%d","method":"ping"}`, i))
+	}
+	for i := 1; i <= 70; i++ {
+		b.recv <- []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":"b%d","method":"ping"}`, i))
+	}
+	got := 0
+	deadline := time.After(2 * time.Second)
+	for got < 6 {
+		select {
+		case <-b.sent:
+			got++
+		case <-deadline:
+			t.Fatalf("backend b got %d replies while a holds its slots, want at least 6", got)
 		}
 	}
 }
