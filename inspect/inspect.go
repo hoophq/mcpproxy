@@ -81,7 +81,11 @@ type Check interface {
 type Identity struct {
 	Subject string
 	Email   string
-	Claims  map[string]any
+	// Key is the stable key of the account when Subject is not one: a
+	// GitHub login can be renamed and reclaimed, so that resolver sets the
+	// numeric id here. Empty means Subject is the key.
+	Key    string
+	Claims map[string]any
 }
 
 // Session is the per-MCP-session state shared by all checks. Concrete state

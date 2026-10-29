@@ -181,3 +181,63 @@ func TestSessionSurvivesAnEmailChange(t *testing.T) {
 		t.Fatalf("POST after DELETE: %d, want 404", code)
 	}
 }
+
+// callKeyed is call with an account key the resolver reads from X-Key.
+func callKeyed(t *testing.T, url, method, user, key, sid, body string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequestWithContext(context.Background(), method, url+"/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User", user)
+	req.Header.Set("X-Key", key)
+	if sid != "" {
+		req.Header.Set("Mcp-Session-Id", sid)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s as %s: %v", method, user, err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.ReadAll(resp.Body)
+	return resp.StatusCode, resp.Header.Get("Mcp-Session-Id")
+}
+
+// The account key owns the session, not the login: a renamed opener keeps
+// it, and another account that takes the old login does not get it.
+func TestSessionFollowsTheAccountKeyNotTheLogin(t *testing.T) {
+	srv := testmcp.New()
+	hs := httptest.NewServer(srv.HTTPHandler())
+	defer hs.Close()
+	gw, err := gateway.New(gateway.Options{
+		Backends: map[string]backend.Factory{
+			"main": backend.NewFactory("main", config.Backend{Transport: "streamable-http", URL: hs.URL}, nil),
+		},
+		Pipeline: checks.Assemble(config.Policy{}, inspect.Hooks{}, audit.Discard, false),
+		Resolver: func(r *http.Request) (inspect.Identity, error) {
+			return inspect.Identity{Subject: r.Header.Get("X-User"), Key: r.Header.Get("X-Key")}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+	defer gw.Close()
+	front := httptest.NewServer(gw.Handler())
+	defer front.Close()
+	const initialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"t","version":"0"},"capabilities":{}}}`
+	const list = `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`
+	code, sid := callKeyed(t, front.URL, http.MethodPost, "alice", "1001", "", initialize)
+	if code != 200 || sid == "" {
+		t.Fatalf("initialize: %d", code)
+	}
+	if code, _ := callKeyed(t, front.URL, http.MethodPost, "alice-renamed", "1001", sid, list); code != 200 {
+		t.Fatalf("the renamed opener: %d, want 200", code)
+	}
+	if code, _ := callKeyed(t, front.URL, http.MethodPost, "alice", "2002", sid, list); code != http.StatusNotFound {
+		t.Fatalf("another account with the old login: %d, want 404", code)
+	}
+	if code, _ := callKeyed(t, front.URL, http.MethodDelete, "alice", "2002", sid, ""); code != http.StatusNoContent {
+		t.Fatalf("DELETE by another account: %d", code)
+	}
+	if code, _ := callKeyed(t, front.URL, http.MethodPost, "alice-renamed", "1001", sid, list); code != 200 {
+		t.Fatalf("the opener after a foreign DELETE: %d, want 200 (it ended nothing)", code)
+	}
+}

@@ -168,7 +168,11 @@ func (v *githubValidator) validate(r *http.Request, tok string) (inspect.Identit
 		claims["org"] = matched
 	}
 
-	return inspect.Identity{Subject: u.Login, Email: u.Email, Claims: claims}, nil
+	id := inspect.Identity{Subject: u.Login, Email: u.Email, Claims: claims}
+	if u.ID != 0 {
+		id.Key = fmt.Sprint(u.ID)
+	}
+	return id, nil
 }
 
 // get performs an authenticated GET against the GitHub API and decodes JSON

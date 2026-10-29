@@ -78,10 +78,18 @@ func (g *Gateway) sessionFor(sid string, identity inspect.Identity) *conn {
 	return nil
 }
 
-// sameCaller compares the subject only: a resolver can re-read a changed
-// email during a session (GitHub, OIDC); the subject does not change.
+// sameCaller compares the key of the account: Key when the resolver sets
+// one (a GitHub login can be renamed and reclaimed, its id cannot), else
+// the subject. An email can change during a session and is not a key.
 func sameCaller(a, b inspect.Identity) bool {
-	return a.Subject == b.Subject
+	return callerKey(a) == callerKey(b)
+}
+
+func callerKey(id inspect.Identity) string {
+	if id.Key != "" {
+		return "key:" + id.Key
+	}
+	return "sub:" + id.Subject
 }
 
 // handlePost processes one client JSON-RPC message.
