@@ -99,7 +99,7 @@ checklist;
 | Endpoint | Purpose |
 |---|---|
 | `POST /mcp` | one JSON-RPC message (initialize starts a session; later messages carry the `Mcp-Session-Id` header) |
-| `GET /mcp` | SSE stream of server-initiated messages for the session. The gateway queues 64 of them; when the stream drains slower than the server sends, or is not open, the oldest is dropped, a dropped server request gets an error reply, and the backend pump never waits |
+| `GET /mcp` | SSE stream of server-initiated messages for the session. The gateway queues 64 of them; when the stream drains slower than the server sends, or is not open, the oldest is dropped, a dropped server request gets an error reply (at most 8 in flight per session), and the backend pump never waits |
 | `DELETE /mcp` | end the session |
 | `GET /approvals/` | pending held tool calls (bearer: `approvals.api_token`) |
 | `POST /approvals/{id}/approve` \| `/reject` | resolve a held call |

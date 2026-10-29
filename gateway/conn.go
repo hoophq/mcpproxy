@@ -60,7 +60,9 @@ type conn struct {
 	// s2c carries server-initiated messages (requests, notifications)
 	// toward the client's SSE stream. See enqueueS2C.
 	s2c     chan s2cMsg
+	s2cMu   sync.Mutex // serializes evict and insert across backend pumps
 	dropped atomic.Int64
+	replies chan struct{} // drop replies in flight, see dropS2C
 
 	mu       sync.Mutex
 	last     time.Time
@@ -160,6 +162,10 @@ const s2cQueue = 64
 // still in flight, at most this long.
 const dropReplyTimeout = 5 * time.Second
 
+// dropReplyLimit caps the replies in flight per session, so a backend that
+// floods server requests and never accepts replies cannot pile up goroutines.
+const dropReplyLimit = 8
+
 type s2cMsg struct {
 	raw []byte
 	bc  *backendConn
@@ -169,12 +175,22 @@ type s2cMsg struct {
 // never blocks the pump: a full queue drops its oldest message, so a session
 // with no stream open still receives its responses.
 func (c *conn) enqueueS2C(bc *backendConn, raw []byte) {
-	msg := s2cMsg{raw: raw, bc: bc}
+	for _, d := range c.offerS2C(s2cMsg{raw: raw, bc: bc}) {
+		c.dropS2C(d)
+	}
+}
+
+// offerS2C puts msg on the queue and evicts the oldest message when it is
+// full, under one lock so concurrent pumps keep the drop-oldest order. It
+// never blocks. It returns what it dropped.
+func (c *conn) offerS2C(msg s2cMsg) []s2cMsg {
+	c.s2cMu.Lock()
+	defer c.s2cMu.Unlock()
 	select {
 	case c.s2c <- msg:
-		return
+		return nil
 	case <-c.done:
-		return
+		return nil
 	default:
 	}
 	var dropped []s2cMsg
@@ -188,9 +204,7 @@ func (c *conn) enqueueS2C(bc *backendConn, raw []byte) {
 	default:
 		dropped = append(dropped, msg)
 	}
-	for _, d := range dropped {
-		c.dropS2C(d)
-	}
+	return dropped
 }
 
 // dropS2C answers a dropped server request with an error, so the server stops
@@ -201,11 +215,17 @@ func (c *conn) dropS2C(m s2cMsg) {
 	if env, err := jsonrpc.Parse(m.raw); err == nil && env.IsRequest() {
 		reply := jsonrpc.NewError(env.ID, jsonrpc.CodeInternalError, "client has no stream open for server requests")
 		if rb, err := reply.Marshal(); err == nil {
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), dropReplyTimeout)
-				defer cancel()
-				_ = m.bc.b.Send(ctx, rb)
-			}()
+			select {
+			case c.replies <- struct{}{}:
+				go func() {
+					defer func() { <-c.replies }()
+					ctx, cancel := context.WithTimeout(context.Background(), dropReplyTimeout)
+					defer cancel()
+					_ = m.bc.b.Send(ctx, rb)
+				}()
+			default:
+				c.g.log.Debug("drop reply skipped, limit reached", "sid", c.state.ID(), "backend", m.bc.name)
+			}
 		}
 	}
 	if c.dropped.Add(1) == 1 {

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,6 +31,11 @@ type fakeBE struct {
 	done chan struct{}
 	sent chan []byte
 	once sync.Once
+
+	// hold, when set, parks every response Send until it closes.
+	hold        chan struct{}
+	inflight    atomic.Int32
+	maxInflight atomic.Int32
 }
 
 func newFakeBE(name string) *fakeBE {
@@ -47,6 +53,17 @@ func (b *fakeBE) Send(_ context.Context, msg []byte) error {
 		return err
 	}
 	if env.IsResponse() {
+		if b.hold != nil {
+			n := b.inflight.Add(1)
+			for {
+				m := b.maxInflight.Load()
+				if n <= m || b.maxInflight.CompareAndSwap(m, n) {
+					break
+				}
+			}
+			<-b.hold
+			b.inflight.Add(-1)
+		}
 		b.sent <- msg
 		return nil
 	}
@@ -283,5 +300,86 @@ func TestDropReplyDoesNotDelayTheResult(t *testing.T) {
 	}
 	if d > 2*time.Second {
 		t.Fatalf("the result waited %v on the drop replies", d.Round(time.Millisecond))
+	}
+}
+
+// A backend that accepts no reply holds at most dropReplyLimit reply
+// goroutines per session; the rest are skipped and tool calls go on.
+func TestDropRepliesAreBounded(t *testing.T) {
+	bes, front := newFakeGateway(t, audit.Discard, "main")
+	c := &tclient{t: t, url: front.URL}
+	c.initialize()
+	be := bes["main"]
+	be.hold = make(chan struct{})
+	defer close(be.hold)
+	for i := 1; i <= 300; i++ {
+		be.recv <- []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":"s%d","method":"ping"}`, i))
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for be.maxInflight.Load() < 8 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := be.maxInflight.Load(); n != 8 {
+		t.Fatalf("replies in flight to a backend that accepts none = %d, want 8", n)
+	}
+	m, code := c.post(`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"echo","arguments":{}}}`)
+	if code != 200 || m["result"] == nil {
+		t.Fatalf("tools/call while 8 replies wait: %d %v", code, m)
+	}
+}
+
+// Two pumps overflowing the queue at once: drop-oldest holds per backend,
+// so what the GET stream keeps of each backend is a suffix of its sequence.
+func TestConcurrentPumpsKeepDropOldestOrder(t *testing.T) {
+	bes, front := newFakeGateway(t, audit.Discard, "a", "b")
+	c := &tclient{t: t, url: front.URL}
+	c.initialize()
+	const n = 2000
+	var wg sync.WaitGroup
+	for name, be := range bes {
+		wg.Add(1)
+		go func(name string, be *fakeBE) {
+			defer wg.Done()
+			for i := 1; i <= n; i++ {
+				be.recv <- []byte(fmt.Sprintf(`{"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","data":"%s %d"}}`, name, i))
+			}
+		}(name, be)
+	}
+	wg.Wait()
+	time.Sleep(300 * time.Millisecond)
+	ev, err := readSSE(front.URL, c.sid, 500*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ev) != 64 {
+		t.Fatalf("GET stream holds %d events, want 64", len(ev))
+	}
+	kept := map[string][]int{}
+	for _, e := range ev {
+		var msg struct {
+			Params struct {
+				Data string `json:"data"`
+			} `json:"params"`
+		}
+		var name string
+		var num int
+		if json.Unmarshal([]byte(e), &msg) != nil {
+			t.Fatalf("bad event %s", e)
+		}
+		if _, err := fmt.Sscanf(msg.Params.Data, "%s %d", &name, &num); err != nil {
+			t.Fatalf("bad data %q", msg.Params.Data)
+		}
+		kept[name] = append(kept[name], num)
+	}
+	for name, nums := range kept {
+		for i := 1; i < len(nums); i++ {
+			if nums[i] != nums[i-1]+1 {
+				t.Fatalf("%s kept %v: a newer message was dropped before an older one", name, nums)
+			}
+		}
+		if last := nums[len(nums)-1]; last != n {
+			t.Fatalf("%s kept %v: its newest message %d was dropped", name, nums, n)
+		}
 	}
 }
