@@ -51,7 +51,7 @@ func (g *Gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 		g.handleSSE(w, r, identity)
 	case http.MethodDelete:
 		if sid := r.Header.Get(sessionHeader); sid != "" && g.sessionFor(sid, identity) != nil {
-			g.dropSession(sid)
+			g.dropSession(sid, nil)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
@@ -197,8 +197,7 @@ func (c *conn) handleC2S(ctx context.Context, env *jsonrpc.Message) (*jsonrpc.Me
 		}
 		return nil, nil
 	case inspect.Kill:
-		c.g.dropSession(c.state.ID())
-		c.shutdown(fmt.Errorf("%s", dec.Reason))
+		c.kill(dec.Reason)
 		if env.IsRequest() {
 			return jsonrpc.NewError(env.ID, jsonrpc.CodePolicyDenied, dec.Reason), nil
 		}
@@ -258,8 +257,7 @@ func (c *conn) inspectResponse(ctx context.Context, backendName string, req, res
 	case inspect.Deny:
 		return jsonrpc.NewError(req.ID, jsonrpc.CodePolicyDenied, dec.Reason), nil
 	case inspect.Kill:
-		c.g.dropSession(c.state.ID())
-		c.shutdown(fmt.Errorf("%s", dec.Reason))
+		c.kill(dec.Reason)
 		return jsonrpc.NewError(req.ID, jsonrpc.CodePolicyDenied, dec.Reason), nil
 	}
 	return resp, nil

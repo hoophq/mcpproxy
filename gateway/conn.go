@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -102,6 +103,14 @@ func (c *conn) shutdown(reason error) {
 	})
 }
 
+// kill ends the session for reason. The shutdown after dropSession covers
+// a session another path already removed from the map.
+func (c *conn) kill(reason string) {
+	err := errors.New(reason)
+	c.g.dropSession(c.state.ID(), err)
+	c.shutdown(err)
+}
+
 // pump drains one backend's recv stream. It hands responses to their waiter
 // and pushes server-initiated traffic through the S2C pipeline to the SSE
 // stream.
@@ -114,7 +123,7 @@ func (c *conn) pump(bc *backendConn) {
 				case <-c.done:
 				default:
 					c.g.log.Warn("backend terminated", "sid", c.state.ID(), "backend", bc.name, "err", bc.b.Err())
-					c.g.dropSession(c.state.ID())
+					c.g.dropSession(c.state.ID(), nil)
 				}
 				return
 			}
@@ -260,8 +269,7 @@ func (c *conn) inspectS2C(bc *backendConn, env *jsonrpc.Message) ([]byte, bool) 
 		}
 		return nil, false
 	case inspect.Kill:
-		c.g.dropSession(c.state.ID())
-		c.shutdown(fmt.Errorf("%s", dec.Reason))
+		c.kill(dec.Reason)
 		return nil, false
 	default: // Hold unsupported for S2C
 		return nil, false

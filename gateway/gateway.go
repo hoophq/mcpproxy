@@ -127,13 +127,15 @@ func (g *Gateway) putSession(c *conn) {
 	g.sess[c.state.ID()] = c
 }
 
-func (g *Gateway) dropSession(id string) {
+// dropSession removes a session and shuts it down. A non-nil reason ends it
+// as killed, so the audit trail says why.
+func (g *Gateway) dropSession(id string, reason error) {
 	g.mu.Lock()
 	c := g.sess[id]
 	delete(g.sess, id)
 	g.mu.Unlock()
 	if c != nil {
-		c.shutdown(nil)
+		c.shutdown(reason)
 	}
 }
 
