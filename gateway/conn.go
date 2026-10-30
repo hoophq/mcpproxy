@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hoophq/mcpproxy/audit"
@@ -24,6 +25,7 @@ type backendConn struct {
 
 	mu      sync.Mutex
 	waiters map[string]chan []byte // id key → response delivery
+	replies chan struct{}          // drop replies in flight, see dropS2C
 }
 
 func (bc *backendConn) addWaiter(key string) chan []byte {
@@ -57,8 +59,10 @@ type conn struct {
 	backends map[string]*backendConn
 
 	// s2c carries server-initiated messages (requests, notifications)
-	// toward the client's SSE stream.
-	s2c chan []byte
+	// toward the client's SSE stream. See enqueueS2C.
+	s2c     chan s2cMsg
+	s2cMu   sync.Mutex // serializes evict and insert across backend pumps
+	dropped atomic.Int64
 
 	mu       sync.Mutex
 	last     time.Time
@@ -144,10 +148,94 @@ func (c *conn) dispatchFromBackend(bc *backendConn, raw []byte) {
 	if !ok {
 		return // denied; error already sent back to backend if request
 	}
-	select {
-	case c.s2c <- out:
-	case <-c.done:
+	c.enqueueS2C(bc, out)
+}
+
+// s2cQueue is how many server-initiated messages wait for the client's GET
+// stream before the oldest is dropped.
+const s2cQueue = 64
+
+// dropReplyTimeout bounds the error reply sent to a server whose request
+// was dropped, so a remote backend slow to accept it cannot hold anything
+// up. A stdio backend's Send ignores the deadline and waits on the child's
+// stdin; Close ends that wait. Session DELETE and Close wait for replies
+// still in flight, at most this long.
+const dropReplyTimeout = 5 * time.Second
+
+// dropReplyLimit caps the replies in flight per backend, so one that floods
+// server requests and never accepts replies cannot pile up goroutines or
+// hold the slots of another backend.
+const dropReplyLimit = 8
+
+type s2cMsg struct {
+	raw []byte
+	bc  *backendConn
+}
+
+// enqueueS2C hands a server-initiated message to the client's GET stream and
+// never blocks the pump: a full queue drops its oldest message, so a session
+// with no stream open still receives its responses.
+func (c *conn) enqueueS2C(bc *backendConn, raw []byte) {
+	for _, d := range c.offerS2C(s2cMsg{raw: raw, bc: bc}) {
+		c.dropS2C(d)
 	}
+}
+
+// offerS2C puts msg on the queue and evicts the oldest message when it is
+// full, under one lock so concurrent pumps keep the drop-oldest order. It
+// never blocks. It returns what it dropped.
+func (c *conn) offerS2C(msg s2cMsg) []s2cMsg {
+	c.s2cMu.Lock()
+	defer c.s2cMu.Unlock()
+	select {
+	case c.s2c <- msg:
+		return nil
+	case <-c.done:
+		return nil
+	default:
+	}
+	var dropped []s2cMsg
+	select {
+	case old := <-c.s2c:
+		dropped = append(dropped, old)
+	default:
+	}
+	select {
+	case c.s2c <- msg:
+	default:
+		dropped = append(dropped, msg)
+	}
+	return dropped
+}
+
+// dropS2C answers a dropped server request with an error, so the server stops
+// waiting, and audits the first drop of the session. The reply goes out off
+// the pump, with a deadline: the pump must never wait on a backend.
+func (c *conn) dropS2C(m s2cMsg) {
+	ctx := context.Background()
+	if env, err := jsonrpc.Parse(m.raw); err == nil && env.IsRequest() {
+		reply := jsonrpc.NewError(env.ID, jsonrpc.CodeInternalError, "client has no stream open for server requests")
+		if rb, err := reply.Marshal(); err == nil {
+			select {
+			case m.bc.replies <- struct{}{}:
+				go func() {
+					defer func() { <-m.bc.replies }()
+					ctx, cancel := context.WithTimeout(context.Background(), dropReplyTimeout)
+					defer cancel()
+					_ = m.bc.b.Send(ctx, rb)
+				}()
+			default:
+				c.g.log.Debug("drop reply skipped, limit reached", "sid", c.state.ID(), "backend", m.bc.name)
+			}
+		}
+	}
+	if c.dropped.Add(1) == 1 {
+		c.g.sink.Emit(ctx, audit.Event{
+			Time: time.Now(), Type: audit.EventError, Session: c.state.ID(),
+			Backend: m.bc.name, Reason: "server-to-client queue full with no stream draining it; dropping the oldest messages",
+		})
+	}
+	c.g.log.Debug("dropped server-to-client message", "sid", c.state.ID(), "backend", m.bc.name)
 }
 
 // inspectS2C runs the pipeline on a server-initiated message. Returns the

@@ -187,7 +187,7 @@ func (g *Gateway) startSession(ctx context.Context, identity inspect.Identity) (
 		g:        g,
 		state:    st,
 		backends: map[string]*backendConn{},
-		s2c:      make(chan []byte, 64),
+		s2c:      make(chan s2cMsg, s2cQueue),
 		done:     make(chan struct{}),
 	}
 	c.touch()
@@ -206,7 +206,7 @@ func (g *Gateway) startSession(ctx context.Context, identity inspect.Identity) (
 			c.shutdown(nil)
 			return nil, fmt.Errorf("starting backend %s: %w", name, err)
 		}
-		bc := &backendConn{name: name, b: b, waiters: map[string]chan []byte{}}
+		bc := &backendConn{name: name, b: b, waiters: map[string]chan []byte{}, replies: make(chan struct{}, dropReplyLimit)}
 		c.backends[name] = bc
 		go c.pump(bc)
 	}

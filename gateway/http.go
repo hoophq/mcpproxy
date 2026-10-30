@@ -323,7 +323,7 @@ func (g *Gateway) handleSSE(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case msg := <-c.s2c:
-			if _, err := fmt.Fprintf(w, "data: %s\n\n", msg); err != nil {
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", msg.raw); err != nil {
 				return
 			}
 			fl.Flush()
