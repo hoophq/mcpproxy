@@ -84,6 +84,7 @@ Stable vocabulary (see `audit/audit.go`): `mcp.session_start/end/killed`,
 `mcp.initialize`, `mcp.tools_listed`, `mcp.tool_call`, `mcp.tool_result`,
 `mcp.tool_denied`, `mcp.tools_changed`, `mcp.server_request[_denied]`,
 `mcp.approval_pending/resolved`, `mcp.budget_exceeded`, `mcp.redacted`,
-`mcp.guardrail_block`, `mcp.error`. Every event carries session, user,
+`mcp.guardrail_block`, `mcp.session_refused`, `mcp.error`. Every event
+carries session, user,
 backend, tool, rule, and reason. Sinks fan out (log plus WAL by default),
 and the gateway records arguments as digests, never raw.

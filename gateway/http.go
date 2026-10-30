@@ -41,19 +41,50 @@ func (g *Gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized: "+err.Error(), http.StatusUnauthorized)
 		return
 	}
+	if identity.Subject == "" {
+		identity.Subject = "anonymous"
+	}
 	switch r.Method {
 	case http.MethodPost:
 		g.handlePost(w, r, identity)
 	case http.MethodGet:
-		g.handleSSE(w, r)
+		g.handleSSE(w, r, identity)
 	case http.MethodDelete:
-		if sid := r.Header.Get(sessionHeader); sid != "" {
+		if sid := r.Header.Get(sessionHeader); sid != "" && g.sessionFor(sid, identity) != nil {
 			g.dropSession(sid)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// sessionFor returns the session sid when identity opened it. Another caller
+// gets nil, as for an unknown id: the id alone must not let anyone use or
+// end a session, and the refusal is audited. Callers the resolver cannot
+// tell apart share one identity and so share sessions; binding them needs
+// inbound auth.
+func (g *Gateway) sessionFor(sid string, identity inspect.Identity) *conn {
+	c := g.getSession(sid)
+	if c == nil || sameCaller(c.state.Identity(), identity) {
+		return c
+	}
+	g.log.Warn("session used by another caller", "sid", sid,
+		"owner", c.state.Identity().Subject, "caller", identity.Subject)
+	g.sink.Emit(context.Background(), audit.Event{
+		Time: time.Now(), Type: audit.EventSessionRefused, Session: sid,
+		User: identity.Subject, Reason: "session opened by another caller",
+	})
+	return nil
+}
+
+// sameCaller compares the subject and, when the resolver sets one, the
+// stable key of the account (a GitHub login can be renamed and reclaimed,
+// its id cannot). A caller whose login or key changed starts a new session,
+// so one session is always audited under one login. An email can change
+// during a session and is not compared.
+func sameCaller(a, b inspect.Identity) bool {
+	return a.Subject == b.Subject && a.Key == b.Key
 }
 
 // handlePost processes one client JSON-RPC message.
@@ -96,7 +127,7 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 			http.Error(w, "missing "+sessionHeader, http.StatusBadRequest)
 			return
 		}
-		c = g.getSession(sid)
+		c = g.sessionFor(sid, identity)
 		if c == nil {
 			http.Error(w, "unknown session", http.StatusNotFound)
 			return
@@ -300,13 +331,13 @@ func (c *conn) auditToolResult(ctx context.Context, backendName, tool string, re
 }
 
 // handleSSE serves the S2C stream (server-initiated requests/notifications).
-func (g *Gateway) handleSSE(w http.ResponseWriter, r *http.Request) {
+func (g *Gateway) handleSSE(w http.ResponseWriter, r *http.Request, identity inspect.Identity) {
 	sid := r.Header.Get(sessionHeader)
 	if sid == "" {
 		http.Error(w, "missing "+sessionHeader, http.StatusBadRequest)
 		return
 	}
-	c := g.getSession(sid)
+	c := g.sessionFor(sid, identity)
 	if c == nil {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
