@@ -70,6 +70,10 @@ type conn struct {
 	initRes  []byte // cached initialize result (aggregated)
 	done     chan struct{}
 	shutOnce sync.Once
+
+	// killReason is set before a kill tears the session down, so any
+	// teardown that wins the race still ends it as killed.
+	killReason atomic.Pointer[string]
 }
 
 func (c *conn) touch() {
@@ -87,6 +91,9 @@ func (c *conn) lastSeen() time.Time {
 // shutdown terminates the session; reason may be nil (normal teardown).
 func (c *conn) shutdown(reason error) {
 	c.shutOnce.Do(func() {
+		if r := c.killReason.Load(); reason == nil && r != nil {
+			reason = errors.New(*r)
+		}
 		close(c.done)
 		for _, bc := range c.backends {
 			_ = bc.b.Close()
@@ -103,12 +110,11 @@ func (c *conn) shutdown(reason error) {
 	})
 }
 
-// kill ends the session for reason. The shutdown after dropSession covers
-// a session another path already removed from the map.
+// kill ends the session for reason, which the audit trail records.
 func (c *conn) kill(reason string) {
-	err := errors.New(reason)
-	c.g.dropSession(c.state.ID(), err)
-	c.shutdown(err)
+	c.killReason.Store(&reason)
+	c.g.dropSession(c.state.ID())
+	c.shutdown(errors.New(reason))
 }
 
 // pump drains one backend's recv stream. It hands responses to their waiter
@@ -123,7 +129,7 @@ func (c *conn) pump(bc *backendConn) {
 				case <-c.done:
 				default:
 					c.g.log.Warn("backend terminated", "sid", c.state.ID(), "backend", bc.name, "err", bc.b.Err())
-					c.g.dropSession(c.state.ID(), nil)
+					c.g.dropSession(c.state.ID())
 				}
 				return
 			}

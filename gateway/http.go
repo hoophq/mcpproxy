@@ -51,7 +51,7 @@ func (g *Gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 		g.handleSSE(w, r, identity)
 	case http.MethodDelete:
 		if sid := r.Header.Get(sessionHeader); sid != "" && g.sessionFor(sid, identity) != nil {
-			g.dropSession(sid, nil)
+			g.dropSession(sid)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
