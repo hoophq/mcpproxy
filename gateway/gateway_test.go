@@ -11,7 +11,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hoophq/mcpproxy/audit"
@@ -281,6 +283,48 @@ func TestBudgetMaxCalls(t *testing.T) {
 	errObj, ok := m["error"].(map[string]any)
 	if !ok || int(errObj["code"].(float64)) != -32012 {
 		t.Fatalf("expected CodeBudgetExceeded on 3rd call, got %v", m)
+	}
+}
+
+// Requests of one session run concurrently. Sixteen tools/call at once, with
+// a rate limit and a rename in force, are all served; -race guards the
+// check state behind them.
+func TestConcurrentCallsOnOneSession(t *testing.T) {
+	front, stop := newTestGateway(t, config.Policy{
+		ToolRateLimits: map[string]int{"*": 100000},
+		Overrides:      map[string]config.ToolOverride{"echo": {Name: "say"}},
+	})
+	defer stop()
+	c := &tclient{t: t, url: front.URL}
+	c.initialize()
+
+	const n = 16
+	var wg sync.WaitGroup
+	bodies := make([]string, n)
+	codes := make([]int, n)
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body := `{"jsonrpc":"2.0","id":` + strconv.Itoa(100+i) + `,"method":"tools/call","params":{"name":"say","arguments":{"text":"x"}}}`
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, c.url+"/mcp", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Mcp-Session-Id", c.sid)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				bodies[i] = err.Error()
+				return
+			}
+			defer resp.Body.Close()
+			b, _ := io.ReadAll(resp.Body)
+			codes[i], bodies[i] = resp.StatusCode, string(b)
+		}()
+	}
+	wg.Wait()
+	for i := range n {
+		if codes[i] != 200 || !strings.Contains(bodies[i], `"result"`) || strings.Contains(bodies[i], `"error"`) {
+			t.Fatalf("call %d: %d %s", i, codes[i], bodies[i])
+		}
 	}
 }
 

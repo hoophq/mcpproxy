@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -37,6 +38,13 @@ type Budget struct {
 
 	// now is injectable so the sliding window is testable without sleeping.
 	now func() time.Time
+}
+
+// rateWindows holds the per-tool sliding windows. Requests of one session
+// run concurrently, so admission locks across prune, compare and append.
+type rateWindows struct {
+	mu sync.Mutex
+	m  map[string][]time.Time
 }
 
 // NewBudget builds the budget check.
@@ -82,11 +90,19 @@ func (b *Budget) admitCall(ctx context.Context, s inspect.Session, m *inspect.Ms
 	if !ok {
 		return inspect.AllowAll
 	}
+	w := s.Meta(metaKeyWindows, func() any { return &rateWindows{m: map[string][]time.Time{}} }).(*rateWindows)
+	w.mu.Lock()
+	// Stamp the hit under the lock: a time read before a wait would expire early.
 	now := b.now()
-	windows := s.Meta(metaKeyWindows, func() any { return map[string][]time.Time{} }).(map[string][]time.Time)
-	hits := prune(windows[tool], now.Add(-rateWindow))
-	if len(hits) >= limit {
-		windows[tool] = hits
+	hits := prune(w.m[tool], now.Add(-rateWindow))
+	denied := len(hits) >= limit
+	if denied {
+		w.m[tool] = hits
+	} else {
+		w.m[tool] = append(hits, now)
+	}
+	w.mu.Unlock()
+	if denied {
 		reason := fmt.Sprintf("tool %q rate limit exceeded (%d calls/min)", tool, limit)
 		emit(ctx, b.sink, s, audit.Event{
 			Type: audit.EventBudgetExceeded, Backend: m.Backend, Tool: tool,
@@ -95,7 +111,6 @@ func (b *Budget) admitCall(ctx context.Context, s inspect.Session, m *inspect.Ms
 		})
 		return inspect.Denyf(m.Env, jsonrpc.CodeBudgetExceeded, NameBudget, reason)
 	}
-	windows[tool] = append(hits, now)
 	return inspect.AllowAll
 }
 

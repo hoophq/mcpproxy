@@ -94,8 +94,8 @@ type Session interface {
 	// Counter returns a named monotonic counter scoped to the session.
 	Counter(name string) *int64
 	// Meta returns arbitrary per-session state for a check, creating it
-	// with mk on first use. The gateway serializes work per session, so
-	// one goroutine at a time reaches this.
+	// with mk on first use. Requests of one session run concurrently, so
+	// the value must guard its own state.
 	Meta(key string, mk func() any) any
 }
 
