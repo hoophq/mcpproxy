@@ -34,6 +34,8 @@ type State struct {
 
 	ClientInfo mcp.Implementation
 	ServerInfo map[string]mcp.Implementation // per backend
+
+	protocolVersion string
 }
 
 // New creates session state.
@@ -54,6 +56,21 @@ func (s *State) ID() string { return s.id }
 
 // Identity implements inspect.Session.
 func (s *State) Identity() inspect.Identity { return s.identity }
+
+// ProtocolVersion is the version initialize negotiated, the one the client
+// echoes in MCP-Protocol-Version on every later request.
+func (s *State) ProtocolVersion() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.protocolVersion
+}
+
+// SetProtocolVersion records the version the backend answered at initialize.
+func (s *State) SetProtocolVersion(v string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.protocolVersion = v
+}
 
 // TrackRequest records an outgoing C2S request for response correlation.
 func (s *State) TrackRequest(id jsonrpc.ID, backend, method, tool string) {

@@ -101,6 +101,10 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 			http.Error(w, "unknown session", http.StatusNotFound)
 			return
 		}
+		if msg := checkEchoedVersion(r, env, c.state.ProtocolVersion()); msg != nil {
+			writeJSON(w, http.StatusBadRequest, msg)
+			return
+		}
 	}
 	c.touch()
 

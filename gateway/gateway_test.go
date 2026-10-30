@@ -56,20 +56,40 @@ func newTestGateway(t *testing.T, pol config.Policy, names ...string) (*httptest
 }
 
 type tclient struct {
-	t   *testing.T
-	url string
-	sid string
+	t       *testing.T
+	url     string
+	sid     string
+	version string // sent as MCP-Protocol-Version when set
 }
 
-func (c *tclient) post(body string) (map[string]any, int) {
-	c.t.Helper()
+func (c *tclient) request(body string) *http.Request {
 	req, _ := http.NewRequestWithContext(context.Background(),
 		http.MethodPost, c.url+"/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if c.sid != "" {
 		req.Header.Set("Mcp-Session-Id", c.sid)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	if c.version != "" {
+		req.Header.Set("MCP-Protocol-Version", c.version)
+	}
+	return req
+}
+
+// postRaw returns the status and the body as sent, error bodies included.
+func (c *tclient) postRaw(body string) (int, string) {
+	c.t.Helper()
+	resp, err := http.DefaultClient.Do(c.request(body))
+	if err != nil {
+		c.t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func (c *tclient) post(body string) (map[string]any, int) {
+	c.t.Helper()
+	resp, err := http.DefaultClient.Do(c.request(body))
 	if err != nil {
 		c.t.Fatalf("post: %v", err)
 	}
@@ -201,6 +221,35 @@ func TestAggregationPrefixesAndRoutes(t *testing.T) {
 	}
 	if !strings.Contains(mustJSON(m["result"]), "routed") {
 		t.Fatalf("bad result: %v", m["result"])
+	}
+}
+
+// testmcp negotiates 2025-06-18. A client that echoes it, as the spec requires
+// since that revision, is served; one that echoes another version is refused
+// and told which version its session speaks.
+func TestEchoedVersionJudgedAgainstNegotiated(t *testing.T) {
+	front, stop := newTestGateway(t, config.Policy{})
+	defer stop()
+	c := &tclient{t: t, url: front.URL}
+	c.initialize()
+
+	c.version = testmcp.ProtocolVersion
+	if m, code := c.post(`{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}`); code != 200 || m["result"] == nil {
+		t.Fatalf("echoing the negotiated version: %d %v", code, m)
+	}
+
+	c.version = "2025-11-25"
+	code, body := c.postRaw(`{"jsonrpc":"2.0","id":4,"method":"tools/list","params":{}}`)
+	if code != http.StatusBadRequest || !strings.Contains(body, `"code":-32022`) {
+		t.Fatalf("echoing another version: %d %s", code, body)
+	}
+	if !strings.Contains(body, `"supported":["`+testmcp.ProtocolVersion+`"]`) || !strings.Contains(body, `"requested":"2025-11-25"`) {
+		t.Fatalf("refusal does not name the session's version: %s", body)
+	}
+
+	c.version = ""
+	if m, code := c.post(`{"jsonrpc":"2.0","id":5,"method":"tools/list","params":{}}`); code != 200 || m["result"] == nil {
+		t.Fatalf("no header: %d %v", code, m)
 	}
 }
 
