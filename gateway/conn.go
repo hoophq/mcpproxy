@@ -69,6 +69,10 @@ type conn struct {
 	initRes  []byte // cached initialize result (aggregated)
 	done     chan struct{}
 	shutOnce sync.Once
+
+	// killReason is the first kill's reason, set before it tears the
+	// session down, so any teardown that wins the race ends it as killed.
+	killReason atomic.Pointer[string]
 }
 
 func (c *conn) touch() {
@@ -83,8 +87,9 @@ func (c *conn) lastSeen() time.Time {
 	return c.last
 }
 
-// shutdown terminates the session; reason may be nil (normal teardown).
-func (c *conn) shutdown(reason error) {
+// shutdown terminates the session: as killed when a kill stored its reason,
+// normally otherwise.
+func (c *conn) shutdown() {
 	c.shutOnce.Do(func() {
 		close(c.done)
 		for _, bc := range c.backends {
@@ -94,12 +99,20 @@ func (c *conn) shutdown(reason error) {
 			Time: time.Now(), Type: audit.EventSessionEnd,
 			Session: c.state.ID(), User: c.state.Identity().Subject,
 		}
-		if reason != nil {
+		if r := c.killReason.Load(); r != nil {
 			ev.Type = audit.EventSessionKilled
-			ev.Reason = reason.Error()
+			ev.Reason = *r
 		}
 		c.g.sink.Emit(context.Background(), ev)
 	})
+}
+
+// kill ends the session for reason, which the audit trail records. When
+// kills race, the first reason stands.
+func (c *conn) kill(reason string) {
+	c.killReason.CompareAndSwap(nil, &reason)
+	c.g.dropSession(c.state.ID())
+	c.shutdown()
 }
 
 // pump drains one backend's recv stream. It hands responses to their waiter
@@ -260,8 +273,7 @@ func (c *conn) inspectS2C(bc *backendConn, env *jsonrpc.Message) ([]byte, bool) 
 		}
 		return nil, false
 	case inspect.Kill:
-		c.g.dropSession(c.state.ID())
-		c.shutdown(fmt.Errorf("%s", dec.Reason))
+		c.kill(dec.Reason)
 		return nil, false
 	default: // Hold unsupported for S2C
 		return nil, false
