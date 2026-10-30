@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -71,8 +70,8 @@ type conn struct {
 	done     chan struct{}
 	shutOnce sync.Once
 
-	// killReason is set before a kill tears the session down, so any
-	// teardown that wins the race still ends it as killed.
+	// killReason is the first kill's reason, set before it tears the
+	// session down, so any teardown that wins the race ends it as killed.
 	killReason atomic.Pointer[string]
 }
 
@@ -88,12 +87,10 @@ func (c *conn) lastSeen() time.Time {
 	return c.last
 }
 
-// shutdown terminates the session; reason may be nil (normal teardown).
-func (c *conn) shutdown(reason error) {
+// shutdown terminates the session: as killed when a kill stored its reason,
+// normally otherwise.
+func (c *conn) shutdown() {
 	c.shutOnce.Do(func() {
-		if r := c.killReason.Load(); reason == nil && r != nil {
-			reason = errors.New(*r)
-		}
 		close(c.done)
 		for _, bc := range c.backends {
 			_ = bc.b.Close()
@@ -102,19 +99,20 @@ func (c *conn) shutdown(reason error) {
 			Time: time.Now(), Type: audit.EventSessionEnd,
 			Session: c.state.ID(), User: c.state.Identity().Subject,
 		}
-		if reason != nil {
+		if r := c.killReason.Load(); r != nil {
 			ev.Type = audit.EventSessionKilled
-			ev.Reason = reason.Error()
+			ev.Reason = *r
 		}
 		c.g.sink.Emit(context.Background(), ev)
 	})
 }
 
-// kill ends the session for reason, which the audit trail records.
+// kill ends the session for reason, which the audit trail records. When
+// kills race, the first reason stands.
 func (c *conn) kill(reason string) {
-	c.killReason.Store(&reason)
+	c.killReason.CompareAndSwap(nil, &reason)
 	c.g.dropSession(c.state.ID())
-	c.shutdown(errors.New(reason))
+	c.shutdown()
 }
 
 // pump drains one backend's recv stream. It hands responses to their waiter

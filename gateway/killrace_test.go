@@ -29,9 +29,28 @@ func TestATeardownRacingAKillKeepsTheReason(t *testing.T) {
 	c := &conn{g: &Gateway{sink: log}, state: session.New("s1", inspect.Identity{}), done: make(chan struct{})}
 	reason := "catalog refused"
 	c.killReason.Store(&reason)
-	c.shutdown(nil)
-	c.shutdown(nil)
+	c.shutdown()
+	c.shutdown()
 	if len(log.events) != 1 || log.events[0].Type != audit.EventSessionKilled || log.events[0].Reason != reason {
 		t.Fatalf("events = %+v, want one session_killed with %q", log.events, reason)
+	}
+}
+
+// When kills race, the first reason stands: a later kill does not replace
+// the reason the first one's teardown reads.
+func TestTheFirstKillReasonStands(t *testing.T) {
+	log := &eventLog{}
+	c := &conn{g: &Gateway{sink: log}, state: session.New("s1", inspect.Identity{}), done: make(chan struct{})}
+	c.kill("first")
+	c.kill("second")
+	got := ""
+	if r := c.killReason.Load(); r != nil {
+		got = *r
+	}
+	if got != "first" {
+		t.Fatalf("stored reason = %q, want first", got)
+	}
+	if len(log.events) != 1 || log.events[0].Reason != "first" {
+		t.Fatalf("events = %+v, want one session_killed with first", log.events)
 	}
 }
