@@ -13,6 +13,8 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hoophq/mcpproxy/audit"
@@ -37,9 +39,9 @@ const (
 
 // Session meta keys. Namespaced so host-supplied checks cannot collide.
 const (
-	metaKeyRenames = "checks.overrides.renames" // exposed tool name → real name
-	metaKeyListed  = "checks.policy.listed"     // *bool: a tools/list has completed
-	metaKeyWindows = "checks.budget.windows"    // rate-limit sliding windows
+	metaKeyRenames = "checks.overrides.renames" // *renames: exposed tool name → real name
+	metaKeyListed  = "checks.policy.listed"     // *atomic.Bool: a tools/list has completed
+	metaKeyWindows = "checks.budget.windows"    // *rateWindows: rate-limit sliding windows
 )
 
 // Assemble builds the canonical pipeline. The order is load-bearing:
@@ -140,8 +142,15 @@ func rawName(raw json.RawMessage) string {
 	return t.Name
 }
 
-func metaStrings(s inspect.Session, key string) map[string]string {
-	return s.Meta(key, func() any { return map[string]string{} }).(map[string]string)
+// renames is the per-session alias table. Requests of one session run
+// concurrently, so it guards itself.
+type renames struct {
+	mu sync.Mutex
+	m  map[string]string
+}
+
+func sessionRenames(s inspect.Session) *renames {
+	return s.Meta(metaKeyRenames, func() any { return &renames{m: map[string]string{}} }).(*renames)
 }
 
 // RealToolName maps a client-visible tool name back to the name the backend
@@ -149,7 +158,10 @@ func metaStrings(s inspect.Session, key string) map[string]string {
 // stage must call this so policy, approvals, and budgets evaluate the real
 // tool. Otherwise an alias would launder a denied call.
 func RealToolName(s inspect.Session, exposed string) string {
-	if real, ok := metaStrings(s, metaKeyRenames)[exposed]; ok {
+	r := sessionRenames(s)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if real, ok := r.m[exposed]; ok {
 		return real
 	}
 	return exposed
@@ -157,14 +169,16 @@ func RealToolName(s inspect.Session, exposed string) string {
 
 // rememberRename records an exposed→real mapping.
 func rememberRename(s inspect.Session, exposed, real string) {
-	mm := metaStrings(s, metaKeyRenames)
-	mm[exposed] = real
+	r := sessionRenames(s)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.m[exposed] = real
 	// Under aggregation the catalog carries "<backend>_<tool>" names but the
 	// gateway strips that prefix before a tools/call reaches the pipeline.
 	// Index the bare pair too so the un-rename still fires.
 	i, j := strings.IndexByte(exposed, '_'), strings.IndexByte(real, '_')
 	if i >= 0 && j >= 0 && exposed[:i] == real[:j] {
-		mm[exposed[i+1:]] = real[j+1:]
+		r.m[exposed[i+1:]] = real[j+1:]
 	}
 }
 
@@ -173,11 +187,15 @@ func rememberRename(s inspect.Session, exposed, real string) {
 // ObserveTool, so flag and contents flip together. Splitting the two across
 // checks would let the policy check refuse tools against an empty catalog.
 func markCatalogListed(s inspect.Session) {
-	*s.Meta(metaKeyListed, func() any { return new(bool) }).(*bool) = true
+	sessionListed(s).Store(true)
 }
 
 func catalogListed(s inspect.Session) bool {
-	return *s.Meta(metaKeyListed, func() any { return new(bool) }).(*bool)
+	return sessionListed(s).Load()
+}
+
+func sessionListed(s inspect.Session) *atomic.Bool {
+	return s.Meta(metaKeyListed, func() any { return new(atomic.Bool) }).(*atomic.Bool)
 }
 
 // toolAdvertised reports whether name appeared in a tools/list the client

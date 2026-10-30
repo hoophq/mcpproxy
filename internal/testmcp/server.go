@@ -41,6 +41,10 @@ const (
 	// ToolBig returns arguments.kb kilobytes of filler text (default 1).
 	// Use it to exercise large-frame handling.
 	ToolBig = "big"
+	// ToolChatty sends arguments.count (default 10) notifications/message
+	// log notifications on the response stream, then answers. Use it to
+	// exercise server-to-client traffic related to one request.
+	ToolChatty = "chatty"
 )
 
 // Server is a scriptable MCP server. The zero value is not usable; call New.
@@ -88,6 +92,11 @@ func DefaultTools() []mcp.Tool {
 			Name:        ToolBig,
 			Description: "Return `kb` kilobytes of filler text.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"kb":{"type":"integer"}}}`),
+		},
+		{
+			Name:        ToolChatty,
+			Description: "Send `count` log notifications, then answer.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"count":{"type":"integer"}}}`),
 		},
 	}
 }
@@ -167,8 +176,15 @@ func (s *Server) emit(m *jsonrpc.Message) {
 }
 
 // Handle processes one client message and returns the response, or nil for a
-// notification. Both transports call it.
+// notification. Both transports call it. Messages a tool sends while it runs
+// go to the GET queue.
 func (s *Server) Handle(ctx context.Context, raw []byte) []byte {
+	return s.HandleStream(ctx, raw, s.emit)
+}
+
+// HandleStream is Handle with the messages a tool sends while it runs handed
+// to related, so a transport can put them on the response stream.
+func (s *Server) HandleStream(ctx context.Context, raw []byte, related func(*jsonrpc.Message)) []byte {
 	env, err := jsonrpc.Parse(raw)
 	if err != nil {
 		return marshal(jsonrpc.NewError(jsonrpc.ID{}, jsonrpc.CodeParseError, err.Error()))
@@ -176,14 +192,14 @@ func (s *Server) Handle(ctx context.Context, raw []byte) []byte {
 	if env.IsResponse() {
 		return nil // a client answering one of our server-initiated requests
 	}
-	resp := s.dispatch(ctx, env)
+	resp := s.dispatch(ctx, env, related)
 	if resp == nil {
 		return nil
 	}
 	return marshal(resp)
 }
 
-func (s *Server) dispatch(ctx context.Context, env *jsonrpc.Message) *jsonrpc.Message {
+func (s *Server) dispatch(ctx context.Context, env *jsonrpc.Message, related func(*jsonrpc.Message)) *jsonrpc.Message {
 	switch env.Method {
 	case mcp.MethodInitialize:
 		res, err := jsonrpc.NewResult(env.ID, mcp.InitializeResult{
@@ -219,7 +235,7 @@ func (s *Server) dispatch(ctx context.Context, env *jsonrpc.Message) *jsonrpc.Me
 		return res
 
 	case mcp.MethodToolsCall:
-		return s.callTool(ctx, env)
+		return s.callTool(ctx, env, related)
 
 	default:
 		if env.IsNotification() {
@@ -229,7 +245,7 @@ func (s *Server) dispatch(ctx context.Context, env *jsonrpc.Message) *jsonrpc.Me
 	}
 }
 
-func (s *Server) callTool(ctx context.Context, env *jsonrpc.Message) *jsonrpc.Message {
+func (s *Server) callTool(ctx context.Context, env *jsonrpc.Message, related func(*jsonrpc.Message)) *jsonrpc.Message {
 	var p mcp.ToolsCallParams
 	if len(env.Params) > 0 {
 		if err := json.Unmarshal(env.Params, &p); err != nil {
@@ -262,6 +278,14 @@ func (s *Server) callTool(ctx context.Context, env *jsonrpc.Message) *jsonrpc.Me
 			kb = 0
 		}
 		text = strings.Repeat("x", kb*1024)
+
+	case ToolChatty:
+		n := argInt(p.Arguments, "count", 10)
+		for i := range n {
+			related(&jsonrpc.Message{JSONRPC: "2.0", Method: "notifications/message",
+				Params: mustJSON(map[string]any{"level": "info", "data": fmt.Sprintf("chatter %d", i+1)})})
+		}
+		text = fmt.Sprintf("chattered %d", n)
 
 	default:
 		// MCP spells an unknown tool as a tool error in the result
@@ -388,18 +412,35 @@ func (s *Server) servePost(w http.ResponseWriter, r *http.Request) {
 	// Assign a session id on the first exchange, as a real server does.
 	w.Header().Set("Mcp-Session-Id", s.sessionID())
 
+	if s.sseResponses() {
+		started := false
+		event := func(b []byte) {
+			if !started {
+				started = true
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+			}
+			fmt.Fprintf(w, "event: message\ndata: %s\n\n", b)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		resp := s.HandleStream(r.Context(), bytes.TrimSpace(body), func(m *jsonrpc.Message) {
+			if b, err := m.Marshal(); err == nil {
+				event(b)
+			}
+		})
+		switch {
+		case resp != nil:
+			event(resp)
+		case !started:
+			w.WriteHeader(http.StatusAccepted)
+		}
+		return
+	}
 	resp := s.Handle(r.Context(), bytes.TrimSpace(body))
 	if resp == nil {
 		w.WriteHeader(http.StatusAccepted)
-		return
-	}
-	if s.sseResponses() {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "event: message\ndata: %s\n\n", resp)
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

@@ -11,7 +11,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hoophq/mcpproxy/audit"
@@ -56,20 +58,40 @@ func newTestGateway(t *testing.T, pol config.Policy, names ...string) (*httptest
 }
 
 type tclient struct {
-	t   *testing.T
-	url string
-	sid string
+	t       *testing.T
+	url     string
+	sid     string
+	version string // sent as MCP-Protocol-Version when set
 }
 
-func (c *tclient) post(body string) (map[string]any, int) {
-	c.t.Helper()
+func (c *tclient) request(body string) *http.Request {
 	req, _ := http.NewRequestWithContext(context.Background(),
 		http.MethodPost, c.url+"/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if c.sid != "" {
 		req.Header.Set("Mcp-Session-Id", c.sid)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	if c.version != "" {
+		req.Header.Set("MCP-Protocol-Version", c.version)
+	}
+	return req
+}
+
+// postRaw returns the status and the body as sent, error bodies included.
+func (c *tclient) postRaw(body string) (int, string) {
+	c.t.Helper()
+	resp, err := http.DefaultClient.Do(c.request(body))
+	if err != nil {
+		c.t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func (c *tclient) post(body string) (map[string]any, int) {
+	c.t.Helper()
+	resp, err := http.DefaultClient.Do(c.request(body))
 	if err != nil {
 		c.t.Fatalf("post: %v", err)
 	}
@@ -204,6 +226,35 @@ func TestAggregationPrefixesAndRoutes(t *testing.T) {
 	}
 }
 
+// testmcp negotiates 2025-06-18. A client that echoes it, as the spec requires
+// since that revision, is served; one that echoes another version is refused
+// and told which version its session speaks.
+func TestEchoedVersionJudgedAgainstNegotiated(t *testing.T) {
+	front, stop := newTestGateway(t, config.Policy{})
+	defer stop()
+	c := &tclient{t: t, url: front.URL}
+	c.initialize()
+
+	c.version = testmcp.ProtocolVersion
+	if m, code := c.post(`{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}`); code != 200 || m["result"] == nil {
+		t.Fatalf("echoing the negotiated version: %d %v", code, m)
+	}
+
+	c.version = "2025-11-25"
+	code, body := c.postRaw(`{"jsonrpc":"2.0","id":4,"method":"tools/list","params":{}}`)
+	if code != http.StatusBadRequest || !strings.Contains(body, `"code":-32022`) {
+		t.Fatalf("echoing another version: %d %s", code, body)
+	}
+	if !strings.Contains(body, `"supported":["`+testmcp.ProtocolVersion+`"]`) || !strings.Contains(body, `"requested":"2025-11-25"`) {
+		t.Fatalf("refusal does not name the session's version: %s", body)
+	}
+
+	c.version = ""
+	if m, code := c.post(`{"jsonrpc":"2.0","id":5,"method":"tools/list","params":{}}`); code != 200 || m["result"] == nil {
+		t.Fatalf("no header: %d %v", code, m)
+	}
+}
+
 func TestUnknownSessionRejected(t *testing.T) {
 	t.Parallel()
 	front, done := newTestGateway(t, config.Policy{})
@@ -232,6 +283,48 @@ func TestBudgetMaxCalls(t *testing.T) {
 	errObj, ok := m["error"].(map[string]any)
 	if !ok || int(errObj["code"].(float64)) != -32012 {
 		t.Fatalf("expected CodeBudgetExceeded on 3rd call, got %v", m)
+	}
+}
+
+// Requests of one session run concurrently. Sixteen tools/call at once, with
+// a rate limit and a rename in force, are all served; -race guards the
+// check state behind them.
+func TestConcurrentCallsOnOneSession(t *testing.T) {
+	front, stop := newTestGateway(t, config.Policy{
+		ToolRateLimits: map[string]int{"*": 100000},
+		Overrides:      map[string]config.ToolOverride{"echo": {Name: "say"}},
+	})
+	defer stop()
+	c := &tclient{t: t, url: front.URL}
+	c.initialize()
+
+	const n = 16
+	var wg sync.WaitGroup
+	bodies := make([]string, n)
+	codes := make([]int, n)
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body := `{"jsonrpc":"2.0","id":` + strconv.Itoa(100+i) + `,"method":"tools/call","params":{"name":"say","arguments":{"text":"x"}}}`
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, c.url+"/mcp", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Mcp-Session-Id", c.sid)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				bodies[i] = err.Error()
+				return
+			}
+			defer resp.Body.Close()
+			b, _ := io.ReadAll(resp.Body)
+			codes[i], bodies[i] = resp.StatusCode, string(b)
+		}()
+	}
+	wg.Wait()
+	for i := range n {
+		if codes[i] != 200 || !strings.Contains(bodies[i], `"result"`) || strings.Contains(bodies[i], `"error"`) {
+			t.Fatalf("call %d: %d %s", i, codes[i], bodies[i])
+		}
 	}
 }
 

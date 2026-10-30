@@ -132,6 +132,10 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 			http.Error(w, "unknown session", http.StatusNotFound)
 			return
 		}
+		if msg := checkEchoedVersion(r, env, c.state.ProtocolVersion()); msg != nil {
+			writeJSON(w, http.StatusBadRequest, msg)
+			return
+		}
 	}
 	c.touch()
 
@@ -350,7 +354,7 @@ func (g *Gateway) handleSSE(w http.ResponseWriter, r *http.Request, identity ins
 	for {
 		select {
 		case msg := <-c.s2c:
-			if _, err := fmt.Fprintf(w, "data: %s\n\n", msg); err != nil {
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", msg.raw); err != nil {
 				return
 			}
 			fl.Flush()
