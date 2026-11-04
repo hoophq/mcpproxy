@@ -126,7 +126,6 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 			http.Error(w, "failed to start session: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		w.Header().Set(sessionHeader, c.state.ID())
 	} else {
 		if sid == "" {
 			http.Error(w, "missing "+sessionHeader, http.StatusBadRequest)
@@ -148,6 +147,13 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 	defer cancel()
 
 	resp, err := c.handleC2S(ctx, env)
+	if env.Method == mcp.MethodInitialize {
+		if err == nil && resp != nil && resp.Error == nil {
+			w.Header().Set(sessionHeader, c.state.ID())
+		} else {
+			g.dropSession(c.state.ID())
+		}
+	}
 	if err != nil {
 		g.log.Warn("c2s handling failed", "sid", c.state.ID(), "method", env.Method, "err", err)
 		if env.IsRequest() {
