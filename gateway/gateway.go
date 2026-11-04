@@ -133,7 +133,7 @@ func (g *Gateway) dropSession(id string) {
 	delete(g.sess, id)
 	g.mu.Unlock()
 	if c != nil {
-		c.shutdown(nil)
+		c.shutdown()
 	}
 }
 
@@ -152,7 +152,7 @@ func (g *Gateway) Close() {
 	g.sess = map[string]*conn{}
 	g.mu.Unlock()
 	for _, c := range conns {
-		c.shutdown(nil)
+		c.shutdown()
 	}
 }
 
@@ -175,7 +175,7 @@ func (g *Gateway) reaper() {
 		g.mu.Unlock()
 		for _, c := range stale {
 			g.log.Info("reaping idle session", "sid", c.state.ID())
-			c.shutdown(nil)
+			c.shutdown()
 		}
 	}
 }
@@ -199,11 +199,11 @@ func (g *Gateway) startSession(ctx context.Context, identity inspect.Identity) (
 	for name, factory := range g.opts.Backends {
 		b, err := factory(bctx)
 		if err != nil {
-			c.shutdown(nil)
+			c.shutdown()
 			return nil, fmt.Errorf("backend %s: %w", name, err)
 		}
 		if err := b.Start(bctx); err != nil {
-			c.shutdown(nil)
+			c.shutdown()
 			return nil, fmt.Errorf("starting backend %s: %w", name, err)
 		}
 		bc := &backendConn{name: name, b: b, waiters: map[string]chan []byte{}, replies: make(chan struct{}, dropReplyLimit)}
