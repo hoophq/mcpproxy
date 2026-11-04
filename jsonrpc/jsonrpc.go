@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // ID is a JSON-RPC id: string, integer, or null. The zero value means
@@ -143,6 +144,20 @@ func Parse(data []byte) (*Message, error) {
 		return nil, fmt.Errorf("message is neither request nor response")
 	}
 	return &m, nil
+}
+
+// FoldedField returns an unrecognized top-level key equal to a standard field
+// under strings.EqualFold, such as "paramſ". A server that matches keys
+// without case, as Go's decoder does, may read it in place of the field.
+func (m *Message) FoldedField() (string, bool) {
+	for k := range m.Extra {
+		for f := range standardFields {
+			if strings.EqualFold(k, f) {
+				return k, true
+			}
+		}
+	}
+	return "", false
 }
 
 // Marshal serializes the message, re-emitting preserved unknown fields.

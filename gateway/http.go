@@ -99,6 +99,11 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 		writeJSON(w, http.StatusOK, jsonrpc.NewError(jsonrpc.ID{}, jsonrpc.CodeParseError, err.Error()))
 		return
 	}
+	if k, ok := env.FoldedField(); ok {
+		writeJSON(w, http.StatusOK, jsonrpc.NewError(env.ID, jsonrpc.CodeInvalidRequest,
+			fmt.Sprintf("field %q equals a JSON-RPC field without case", k)))
+		return
+	}
 
 	// Decide the protocol era before touching session state: a Modern
 	// request carries no session id and must not be measured against the
