@@ -167,9 +167,17 @@ func (c *conn) handleC2S(ctx context.Context, env *jsonrpc.Message) (*jsonrpc.Me
 	toolName := ""
 	switch env.Method {
 	case mcp.MethodToolsCall:
-		full := inspect.RawTool(env.Params)
+		call, err := mcp.ParseToolCall(env.Params)
+		if err != nil {
+			reason := "invalid tools/call params: " + err.Error()
+			c.g.sink.Emit(ctx, audit.Event{
+				Time: time.Now(), Type: audit.EventToolDenied, Session: c.state.ID(),
+				User: c.state.Identity().Subject, Rule: "invalid_params", Reason: reason,
+			})
+			return jsonrpc.NewError(env.ID, jsonrpc.CodeInvalidParams, reason), nil
+		}
+		full := call.Name
 		var bare string
-		var err error
 		bc, bare, err = c.routeTool(full)
 		if err != nil {
 			return jsonrpc.NewError(env.ID, jsonrpc.CodeMethodNotFound, err.Error()), nil

@@ -116,11 +116,13 @@ func Denyf(req *jsonrpc.Message, code int, rule, reason string) Decision {
 	}
 }
 
-// RawTool extracts the tool name from tools/call params without full decode.
+// RawTool reads the exact "name" key of tools/call params, as the server
+// does.
 func RawTool(params json.RawMessage) string {
-	var p struct {
-		Name string `json:"name"`
+	var fields map[string]json.RawMessage
+	var name string
+	if json.Unmarshal(params, &fields) == nil {
+		_ = json.Unmarshal(fields["name"], &name)
 	}
-	_ = json.Unmarshal(params, &p)
-	return p.Name
+	return name
 }
