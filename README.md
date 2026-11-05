@@ -159,6 +159,18 @@ embed the gateway and supply their own implementations of:
   the host already authenticated the caller)
 - `gateway.Observer`: telemetry
 
+`inspect.Hooks.Redact` masks string values, never object keys, in
+`tools/call`, `resources/read` and `tasks/result` results: `content[].text`,
+`content[].resource.text`, `contents[].text` and every string of
+`structuredContent`. Only those exact keys are read; another spelling or a
+duplicate key is not masked.
+
+The hook runs once per string: a `structuredContent` table of 1,000 rows by
+10 columns costs 10,000 calls.
+
+A hook error withholds the result: the client gets `-32010`, and the hook's
+error is never recorded.
+
 A reply the gateway sends on its own to a server request carries the
 context values of the session's latest request, so a `TokenSource`
 resolves the same caller as for that request.

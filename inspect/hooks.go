@@ -13,7 +13,11 @@ type Hooks struct {
 	// toward a backend. A non-nil error blocks the message.
 	GuardInput func(ctx context.Context, dir Direction, text string) error
 	// Redact masks sensitive content in result text leaves, returning the
-	// redacted text and the number of redactions applied.
+	// redacted text and the number of redactions applied. It runs once per
+	// string value of content[].text, content[].resource.text,
+	// contents[].text and structuredContent in tools/call, resources/read
+	// and tasks/result results. Object keys are not masked, and only those
+	// exact keys are read. An error withholds the result.
 	Redact func(ctx context.Context, text string) (string, int, error)
 	// Analyze classifies a tool call before it reaches the backend.
 	// block=true rejects this single request.
