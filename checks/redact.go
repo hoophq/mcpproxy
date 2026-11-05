@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/hoophq/mcpproxy/audit"
@@ -12,9 +13,9 @@ import (
 	"github.com/hoophq/mcpproxy/mcp"
 )
 
-// redactReason is what the client reads when a result is withheld. The hook
-// error goes to the audit event only, because it can quote the text.
-const redactReason = "result withheld: redaction failed"
+// errRedactHook replaces a Redact hook error, which can quote the text: the
+// hook's own error never reaches an event, a log line or the client.
+var errRedactHook = errors.New("redaction failed")
 
 // Redactor masks sensitive strings in tools/call and resources/read results:
 // content[].text, content[].resource.text, contents[].text and every string
@@ -69,7 +70,7 @@ func (r *Redactor) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 			out, n, err = w.array(raw, w.item)
 		}
 		if err != nil {
-			return r.deny(ctx, s, m, err)
+			return r.deny(ctx, s, m)
 		}
 		if n > 0 {
 			result[field] = out
@@ -83,7 +84,7 @@ func (r *Redactor) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 
 	out, err := json.Marshal(result)
 	if err != nil {
-		return r.deny(ctx, s, m, err)
+		return r.deny(ctx, s, m)
 	}
 	m.Env.Result = out
 	emit(ctx, r.sink, s, audit.Event{
@@ -93,12 +94,14 @@ func (r *Redactor) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 	return inspect.AllowAll
 }
 
-func (r *Redactor) deny(ctx context.Context, s inspect.Session, m *inspect.Msg, err error) inspect.Decision {
+// deny withholds the result with a fixed reason.
+func (r *Redactor) deny(ctx context.Context, s inspect.Session, m *inspect.Msg) inspect.Decision {
+	reason := "result withheld: " + errRedactHook.Error()
 	emit(ctx, r.sink, s, audit.Event{
 		Type: audit.EventToolDenied, Backend: m.Backend, Tool: m.CorrelatedTool,
-		Rule: NameRedact, Reason: redactReason + ": " + err.Error(),
+		Rule: NameRedact, Reason: reason,
 	})
-	return inspect.Denyf(m.Env, jsonrpc.CodePolicyDenied, NameRedact, redactReason)
+	return inspect.Denyf(m.Env, jsonrpc.CodePolicyDenied, NameRedact, reason)
 }
 
 // walker runs the Redact hook over the strings of one result. Each method
@@ -238,7 +241,7 @@ func (w *walker) str(raw json.RawMessage) (json.RawMessage, int, error) {
 	}
 	masked, n, err := w.redact(w.ctx, text)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, errRedactHook
 	}
 	if n <= 0 {
 		return raw, 0, nil

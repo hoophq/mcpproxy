@@ -3,7 +3,7 @@ package checks
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -130,10 +130,11 @@ func responseMsg(t *testing.T, method, tool string, result any) *inspect.Msg {
 	}
 }
 
-// maskOrFail masks like maskSecret and fails on any text holding "BOOM".
+// maskOrFail masks like maskSecret and fails on any text holding "BOOM", with
+// an error that quotes the text, as some engines do.
 func maskOrFail(ctx context.Context, text string) (string, int, error) {
 	if strings.Contains(text, "BOOM") {
-		return "", 1, errors.New("redactor down")
+		return "", 1, fmt.Errorf("cannot mask %q", text)
 	}
 	return maskSecret(ctx, text)
 }
@@ -242,22 +243,24 @@ func TestRedactCountsPerMessage(t *testing.T) {
 }
 
 // A Redact hook error on any field denies the whole result: the client gets
-// an error, and the text, masked or not, never leaves.
+// an error, and the text, masked or not, never leaves. The hook's error quotes
+// the text, so it enters neither the reply nor the audit event.
 func TestRedactHookErrorDeniesResult(t *testing.T) {
+	const pii = "BOOM ana@example.com SSN 123-45-6789"
 	cases := []struct {
 		name, method string
 		result       map[string]any
 	}{
-		{"content text", mcp.MethodToolsCall, map[string]any{"content": []any{textItem("BOOM")}}},
+		{"content text", mcp.MethodToolsCall, map[string]any{"content": []any{textItem(pii)}}},
 		{"nested resource text", mcp.MethodToolsCall, map[string]any{"content": []any{
-			map[string]any{"type": "resource", "resource": map[string]any{"uri": "file:///x", "text": "BOOM"}},
+			map[string]any{"type": "resource", "resource": map[string]any{"uri": "file:///x", "text": pii}},
 		}}},
 		{"resources/read contents text", mcp.MethodResourcesRead, map[string]any{"contents": []any{
-			map[string]any{"uri": "file:///x", "text": "BOOM"},
+			map[string]any{"uri": "file:///x", "text": pii},
 		}}},
 		{"structuredContent after a masked field", mcp.MethodToolsCall, map[string]any{
 			"content":           []any{textItem("SECRET")},
-			"structuredContent": map[string]any{"deep": []any{map[string]any{"v": "BOOM"}}},
+			"structuredContent": map[string]any{"deep": []any{map[string]any{"v": pii}}},
 		}},
 	}
 	for _, tc := range cases {
@@ -272,15 +275,22 @@ func TestRedactHookErrorDeniesResult(t *testing.T) {
 			if got.Reply == nil || got.Reply.Error == nil || got.Reply.Error.Code != jsonrpc.CodePolicyDenied {
 				t.Fatalf("reply = %+v, want a policy-denied error", got.Reply)
 			}
-			if strings.Contains(got.Reason, "BOOM") || strings.Contains(got.Reply.Error.Message, "BOOM") {
-				t.Errorf("the client message quotes the text: %q", got.Reply.Error.Message)
-			}
 			if n := rec.count(audit.EventRedacted); n != 0 {
 				t.Errorf("emitted %d redaction events for a withheld result, want 0", n)
 			}
 			ev, ok := rec.last(audit.EventToolDenied)
-			if !ok || ev.Rule != NameRedact || !strings.Contains(ev.Reason, "redactor down") {
-				t.Errorf("denial audit = %+v, want rule %q with the hook error", ev, NameRedact)
+			if !ok || ev.Rule != NameRedact {
+				t.Fatalf("denial audit = %+v, want rule %q", ev, NameRedact)
+			}
+			for _, leak := range []string{"BOOM", "ana@", "123-45", "cannot mask"} {
+				for where, s := range map[string]string{
+					"reply": got.Reply.Error.Message, "reason": got.Reason,
+					"event": fmt.Sprintf("%+v", ev),
+				} {
+					if strings.Contains(s, leak) {
+						t.Errorf("%s holds %q: %s", where, leak, s)
+					}
+				}
 			}
 		})
 	}
