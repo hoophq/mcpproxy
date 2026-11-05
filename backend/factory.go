@@ -24,7 +24,8 @@ const (
 // ts, when non-nil, mints the outbound bearer token for each request to a
 // remote backend. Static, passthrough and OAuth outbound auth all plug in
 // here. Stdio backends ignore it and inherit credentials through their
-// environment instead.
+// environment instead. An sse backend calls it with no caller values: it
+// takes one lane-wide credential.
 //
 // Configuration errors (unknown transport, missing command/url) surface from
 // the returned Factory rather than from NewFactory, so a misconfigured
