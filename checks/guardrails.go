@@ -48,11 +48,11 @@ func (g *Guardrails) Inspect(ctx context.Context, s inspect.Session, m *inspect.
 }
 
 func (g *Guardrails) checkArgs(ctx context.Context, s inspect.Session, m *inspect.Msg, exposed string) inspect.Decision {
-	var p mcp.ToolsCallParams
-	if err := json.Unmarshal(m.Env.Params, &p); err != nil || len(p.Arguments) == 0 {
+	p, err := mcp.ParseToolCall(m.Env.Params)
+	if err != nil || len(p.Arguments) == 0 {
 		return inspect.AllowAll
 	}
-	err := g.guard(ctx, inspect.C2S, string(p.Arguments))
+	err = g.guard(ctx, inspect.C2S, string(p.Arguments))
 	if err == nil {
 		return inspect.AllowAll
 	}

@@ -99,6 +99,11 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 		writeJSON(w, http.StatusOK, jsonrpc.NewError(jsonrpc.ID{}, jsonrpc.CodeParseError, err.Error()))
 		return
 	}
+	if k, ok := env.FoldedField(); ok {
+		writeJSON(w, http.StatusOK, jsonrpc.NewError(env.ID, jsonrpc.CodeInvalidRequest,
+			fmt.Sprintf("field %q equals a JSON-RPC field without case", k)))
+		return
+	}
 
 	// Decide the protocol era before touching session state: a Modern
 	// request carries no session id and must not be measured against the
@@ -121,7 +126,6 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 			http.Error(w, "failed to start session: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		w.Header().Set(sessionHeader, c.state.ID())
 	} else {
 		if sid == "" {
 			http.Error(w, "missing "+sessionHeader, http.StatusBadRequest)
@@ -143,6 +147,13 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 	defer cancel()
 
 	resp, err := c.handleC2S(ctx, env)
+	if env.Method == mcp.MethodInitialize {
+		if err == nil && resp != nil && resp.Error == nil {
+			w.Header().Set(sessionHeader, c.state.ID())
+		} else {
+			g.dropSession(c.state.ID())
+		}
+	}
 	if err != nil {
 		g.log.Warn("c2s handling failed", "sid", c.state.ID(), "method", env.Method, "err", err)
 		if env.IsRequest() {
@@ -167,9 +178,17 @@ func (c *conn) handleC2S(ctx context.Context, env *jsonrpc.Message) (*jsonrpc.Me
 	toolName := ""
 	switch env.Method {
 	case mcp.MethodToolsCall:
-		full := inspect.RawTool(env.Params)
+		call, err := mcp.ParseToolCall(env.Params)
+		if err != nil {
+			reason := "invalid tools/call params: " + err.Error()
+			c.g.sink.Emit(ctx, audit.Event{
+				Time: time.Now(), Type: audit.EventToolDenied, Session: c.state.ID(),
+				User: c.state.Identity().Subject, Rule: "invalid_params", Reason: reason,
+			})
+			return jsonrpc.NewError(env.ID, jsonrpc.CodeInvalidParams, reason), nil
+		}
+		full := call.Name
 		var bare string
-		var err error
 		bc, bare, err = c.routeTool(full)
 		if err != nil {
 			return jsonrpc.NewError(env.ID, jsonrpc.CodeMethodNotFound, err.Error()), nil

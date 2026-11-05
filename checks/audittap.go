@@ -48,8 +48,7 @@ func (a *AuditTap) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 }
 
 func (a *AuditTap) toolCall(ctx context.Context, s inspect.Session, m *inspect.Msg, exposed string) {
-	var p mcp.ToolsCallParams
-	_ = json.Unmarshal(m.Env.Params, &p)
+	p, _ := mcp.ParseToolCall(m.Env.Params)
 	fields := map[string]any{
 		"args_bytes":  len(p.Arguments),
 		"args_sha256": digest(p.Arguments),
