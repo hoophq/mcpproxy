@@ -66,7 +66,8 @@ type conn struct {
 
 	mu       sync.Mutex
 	last     time.Time
-	initRes  []byte // cached initialize result (aggregated)
+	caller   context.Context // values of the latest request, see setCaller
+	initRes  []byte          // cached initialize result (aggregated)
 	done     chan struct{}
 	shutOnce sync.Once
 
@@ -79,6 +80,26 @@ func (c *conn) touch() {
 	c.mu.Lock()
 	c.last = time.Now()
 	c.mu.Unlock()
+}
+
+// setCaller keeps the values of a request of the session owner, without its
+// cancellation, for messages the gateway sends on its own.
+func (c *conn) setCaller(ctx context.Context) {
+	ctx = context.WithoutCancel(ctx)
+	c.mu.Lock()
+	c.caller = ctx
+	c.mu.Unlock()
+}
+
+// callerContext carries the values of the session's latest request, so a
+// backend TokenSource resolves the same caller as for that request.
+func (c *conn) callerContext() context.Context {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.caller == nil {
+		return context.Background()
+	}
+	return c.caller
 }
 
 func (c *conn) lastSeen() time.Time {
@@ -225,7 +246,7 @@ func (c *conn) offerS2C(msg s2cMsg) []s2cMsg {
 // waiting, and audits the first drop of the session. The reply goes out off
 // the pump, with a deadline: the pump must never wait on a backend.
 func (c *conn) dropS2C(m s2cMsg) {
-	ctx := context.Background()
+	ctx := c.callerContext()
 	if env, err := jsonrpc.Parse(m.raw); err == nil && env.IsRequest() {
 		reply := jsonrpc.NewError(env.ID, jsonrpc.CodeInternalError, "client has no stream open for server requests")
 		if rb, err := reply.Marshal(); err == nil {
@@ -233,7 +254,7 @@ func (c *conn) dropS2C(m s2cMsg) {
 			case m.bc.replies <- struct{}{}:
 				go func() {
 					defer func() { <-m.bc.replies }()
-					ctx, cancel := context.WithTimeout(context.Background(), dropReplyTimeout)
+					ctx, cancel := context.WithTimeout(ctx, dropReplyTimeout)
 					defer cancel()
 					_ = m.bc.b.Send(ctx, rb)
 				}()
@@ -254,7 +275,7 @@ func (c *conn) dropS2C(m s2cMsg) {
 // inspectS2C runs the pipeline on a server-initiated message. Returns the
 // (possibly mutated) serialized message and whether to forward it.
 func (c *conn) inspectS2C(bc *backendConn, env *jsonrpc.Message) ([]byte, bool) {
-	ctx := context.Background()
+	ctx := c.callerContext()
 	m := &inspect.Msg{Dir: inspect.S2C, Backend: bc.name, Env: env}
 	dec := c.runPipeline(ctx, m)
 	switch dec.Verdict {

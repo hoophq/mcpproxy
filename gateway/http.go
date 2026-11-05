@@ -140,6 +140,7 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 			writeJSON(w, http.StatusBadRequest, msg)
 			return
 		}
+		c.setCaller(r.Context())
 	}
 	c.touch()
 
