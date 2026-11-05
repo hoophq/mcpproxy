@@ -175,11 +175,6 @@ A reply the gateway sends on its own to a server request carries the
 context values of the session's latest request, so a `TokenSource`
 resolves the same caller as for that request.
 
-An `sse` backend takes one lane-wide credential: its event stream opens
-once and outlives every request. Its `TokenSource` gets no caller values,
-so a per-caller source (passthrough, per-user OAuth, token exchange) is
-refused at start.
-
 Import it the way any Go dependency is imported:
 
 ```sh

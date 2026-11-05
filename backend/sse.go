@@ -33,11 +33,6 @@ type SSEBackend struct {
 	// TokenSource, when non-nil, mints the outbound bearer token for each
 	// request (stream GET and message POSTs alike). Overrides any
 	// Authorization in the static headers.
-	//
-	// The stream opens once and outlives every request, so an SSE backend
-	// takes one lane-wide credential: TokenSource gets no request values,
-	// and a source that needs the caller (passthrough, per-user OAuth, token
-	// exchange) fails Start.
 	TokenSource func(ctx context.Context) (string, error)
 
 	// Client overrides the per-instance HTTP client. Set before Start.
@@ -346,26 +341,20 @@ func (b *SSEBackend) Send(ctx context.Context, msg []byte) error {
 	return nil
 }
 
-// authorize applies the TokenSource bearer, if any. The source sees ctx's
-// deadline but none of its values, so it cannot pick a credential per caller.
+// authorize applies the TokenSource bearer, if any.
 func (b *SSEBackend) authorize(ctx context.Context, req *http.Request) error {
 	if b.TokenSource == nil {
 		return nil
 	}
-	tok, err := b.TokenSource(noValues{ctx})
+	tok, err := b.TokenSource(ctx)
 	if err != nil {
-		return fmt.Errorf("sse backend %s: token source called with no caller (an sse backend takes one lane-wide credential): %w", b.name, err)
+		return fmt.Errorf("sse backend %s: token source: %w", b.name, err)
 	}
 	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	return nil
 }
-
-// noValues keeps a context's deadline and cancellation and hides its values.
-type noValues struct{ context.Context }
-
-func (noValues) Value(any) any { return nil }
 
 // deliver hands one message to the consumer; false once closing.
 func (b *SSEBackend) deliver(msg []byte) bool {

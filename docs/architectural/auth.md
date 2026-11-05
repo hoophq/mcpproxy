@@ -43,9 +43,6 @@ tokens it issued itself.
 | `passthrough` | caller supplies the upstream credential per request via `X-Mcpproxy-Upstream-Authorization`; gateway stores nothing |
 | `oauth` | the full MCP authorization flow (below) |
 
-An `sse` backend takes one lane-wide credential, so it refuses the
-per-caller modes: `passthrough`, `oauth.per_user` and `oauth.token_exchange`.
-
 ### The OAuth flow
 
 ```

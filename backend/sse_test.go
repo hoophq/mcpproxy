@@ -13,11 +13,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/hoophq/mcpproxy/auth/outbound"
 	"github.com/hoophq/mcpproxy/config"
 )
 
@@ -208,65 +206,6 @@ func TestSSETokenSourceAppliedToStreamAndPosts(t *testing.T) {
 	}
 	_ = b.Send(context.Background(), []byte(`{"jsonrpc":"2.0","id":3,"method":"ping"}`))
 	recvOne(t, b)
-}
-
-// An SSE backend takes one lane-wide credential: a source that needs the
-// caller is refused, even when Start's context carries one.
-func TestSSERefusesPerCallerTokenSource(t *testing.T) {
-	t.Parallel()
-	f := newFakeSSE(t)
-	b := NewSSE("test", config.Backend{Transport: "sse", URL: f.srv.URL + "/sse"}, nil)
-	b.TokenSource = outbound.NewPassthrough()
-	err := b.Start(outbound.WithClientToken(context.Background(), "tok-alice"))
-	if err == nil {
-		_ = b.Close()
-		t.Fatal("Start accepted a per-caller token source")
-	}
-	if !strings.Contains(err.Error(), "one lane-wide credential") {
-		t.Fatalf("Start = %v, want a refusal naming the lane-wide credential", err)
-	}
-}
-
-type callerKey struct{}
-
-// The source keeps the request deadline but never sees a caller value, on
-// the stream or on a POST.
-func TestSSETokenSourceSeesNoCallerValues(t *testing.T) {
-	t.Parallel()
-	f := newFakeSSE(t)
-	var sawValue, sawDeadline atomic.Bool
-	b := NewSSE("test", config.Backend{Transport: "sse", URL: f.srv.URL + "/sse"}, nil)
-	b.TokenSource = func(ctx context.Context) (string, error) {
-		if ctx.Value(callerKey{}) != nil {
-			sawValue.Store(true)
-		}
-		if _, ok := ctx.Deadline(); ok {
-			sawDeadline.Store(true)
-		}
-		return "lane", nil
-	}
-	caller := context.WithValue(context.Background(), callerKey{}, "alice")
-	if err := b.Start(caller); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	t.Cleanup(func() { _ = b.Close() })
-	ctx, cancel := context.WithTimeout(caller, 5*time.Second)
-	defer cancel()
-	if err := b.Send(ctx, []byte(`{"jsonrpc":"2.0","id":4,"method":"ping"}`)); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	recvOne(t, b)
-	if sawValue.Load() {
-		t.Fatal("token source saw a caller value")
-	}
-	if !sawDeadline.Load() {
-		t.Fatal("token source lost the request deadline")
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.authHdr != "Bearer lane" {
-		t.Fatalf("stream GET bearer = %q, want the lane-wide one", f.authHdr)
-	}
 }
 
 func TestSSEServerStreamCloseTerminatesBackend(t *testing.T) {
