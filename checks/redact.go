@@ -27,11 +27,13 @@ var (
 	errRedactCanceled = errors.New("redaction canceled")
 )
 
-// Redactor masks sensitive strings in tools/call and resources/read results:
-// content[].text, content[].resource.text, contents[].text and every string
-// of structuredContent. Other fields are structural, and rewriting them would
-// break the protocol. A Redact hook error denies the result, so unmasked text
-// never reaches the client.
+// Redactor masks sensitive strings in tools/call, resources/read and
+// tasks/result results: content[].text, content[].resource.text,
+// contents[].text and every string value of structuredContent. Object keys
+// and other fields are structural, and rewriting them would break the
+// protocol. Only those exact keys are read: another spelling, or a duplicate
+// of one of them, is not masked. A Redact hook error denies the result, so
+// unmasked text never reaches the client.
 type Redactor struct {
 	redact func(ctx context.Context, text string) (string, int, error)
 	sink   audit.Sink
@@ -54,7 +56,9 @@ func (r *Redactor) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 	if !m.Env.IsResponse() || m.Env.Error != nil || len(m.Env.Result) == 0 {
 		return inspect.AllowAll
 	}
-	if m.CorrelatedMethod != mcp.MethodToolsCall && m.CorrelatedMethod != mcp.MethodResourcesRead {
+	switch m.CorrelatedMethod {
+	case mcp.MethodToolsCall, mcp.MethodResourcesRead, mcp.MethodTasksResult:
+	default:
 		return inspect.AllowAll
 	}
 

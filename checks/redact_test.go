@@ -70,6 +70,26 @@ func TestRedactToolResultContent(t *testing.T) {
 	}
 }
 
+// tasks/result carries the result of a task-augmented request, a tool result
+// included.
+func TestRedactTasksResult(t *testing.T) {
+	s, rec, ctx := newSession(t), &recorder{}, context.Background()
+	r := NewRedactor(inspect.Hooks{Redact: maskSecret}, rec)
+	msg := responseMsg(t, mcp.MethodTasksResult, "", map[string]any{
+		"content":           []any{textItem("task output SECRET")},
+		"structuredContent": map[string]any{"email": "SECRET@x.io"},
+	})
+	if got := r.Inspect(ctx, s, msg); got.Verdict != inspect.Allow {
+		t.Fatalf("verdict = %s, want Allow", verdictString(got.Verdict))
+	}
+	if strings.Contains(string(msg.Env.Result), "SECRET") {
+		t.Errorf("tasks/result not masked: %s", msg.Env.Result)
+	}
+	if ev, _ := rec.last(audit.EventRedacted); ev.Fields["redactions"] != 2 {
+		t.Errorf("redactions = %v, want 2", ev.Fields["redactions"])
+	}
+}
+
 func TestRedactResourcesRead(t *testing.T) {
 	s, rec, ctx := newSession(t), &recorder{}, context.Background()
 	r := NewRedactor(inspect.Hooks{Redact: maskSecret}, rec)

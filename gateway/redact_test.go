@@ -64,3 +64,30 @@ func TestRedactHookErrorWithholdsResult(t *testing.T) {
 		t.Fatalf("next call on the session: %v, want a masked result", m)
 	}
 }
+
+// The gateway correlates a tasks/result response, so the redactor masks it.
+func TestRedactMasksTasksResult(t *testing.T) {
+	t.Parallel()
+	be := newFakeBE("main")
+	maskOK := func(_ context.Context, text string) (string, int, error) {
+		n := strings.Count(text, "ok")
+		return strings.ReplaceAll(text, "ok", "[MASKED]"), n, nil
+	}
+	gw, err := gateway.New(gateway.Options{
+		Backends: map[string]backend.Factory{"main": func(context.Context) (backend.Backend, error) { return be, nil }},
+		Pipeline: checks.Assemble(config.Policy{}, inspect.Hooks{Redact: maskOK}, audit.Discard, false),
+	})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+	defer gw.Close()
+	front := httptest.NewServer(gw.Handler())
+	defer front.Close()
+
+	c := &tclient{t: t, url: front.URL}
+	c.initialize()
+	m, _ := c.post(`{"jsonrpc":"2.0","id":5,"method":"tasks/result","params":{"taskId":"t1"}}`)
+	if out := mustJSON(m["result"]); !strings.Contains(out, "[MASKED]") {
+		t.Fatalf("tasks/result = %v, want the fake result text masked", m)
+	}
+}
