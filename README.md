@@ -162,8 +162,9 @@ embed the gateway and supply their own implementations of:
 `inspect.Hooks.Redact` masks string values, never object keys, in
 `tools/call`, `resources/read` and `tasks/result` results: `content[].text`,
 `content[].resource.text`, `contents[].text` and every string of
-`structuredContent`. Only those exact keys are read; another spelling or a
-duplicate key is not masked.
+`structuredContent`. Only those exact keys are read: another spelling, or an
+earlier duplicate of `content`, `contents`, `structuredContent`, `text` or
+`resource`, is not masked. Duplicate keys inside `structuredContent` are.
 
 The hook runs once per string: a `structuredContent` table of 1,000 rows by
 10 columns costs 10,000 calls.
