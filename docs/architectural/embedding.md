@@ -111,6 +111,15 @@ grant keys), `outbound.WithClientToken` (passthrough), and
 context before the gateway handles it. Do this in the resolver, which
 runs first and may rewrite the request context.
 
+A reply the gateway sends on its own to a server request carries the
+context values of the session's latest request, so a `TokenSource`
+resolves the same caller as for that request.
+
+An `sse` backend opens its event stream once, at session start, with the
+credential of the caller that opened the session. A token the caller
+rotates later is not used on that stream; each message POST carries the
+credential of its own request.
+
 ## Custom checks
 
 A check is one interface:

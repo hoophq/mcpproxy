@@ -32,7 +32,9 @@ import (
 type SSEBackend struct {
 	// TokenSource, when non-nil, mints the outbound bearer token for each
 	// request (stream GET and message POSTs alike). Overrides any
-	// Authorization in the static headers.
+	// Authorization in the static headers. The stream GET calls it once,
+	// with Start's context: in the gateway, the request that opened the
+	// session. Each POST calls it with the context of its Send.
 	TokenSource func(ctx context.Context) (string, error)
 
 	// Client overrides the per-instance HTTP client. Set before Start.

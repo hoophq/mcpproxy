@@ -175,6 +175,11 @@ A reply the gateway sends on its own to a server request carries the
 context values of the session's latest request, so a `TokenSource`
 resolves the same caller as for that request.
 
+An `sse` backend opens its event stream once, at session start, with the
+credential of the caller that opened the session. A token the caller
+rotates later is not used on that stream; each message POST carries the
+credential of its own request.
+
 Import it the way any Go dependency is imported:
 
 ```sh
