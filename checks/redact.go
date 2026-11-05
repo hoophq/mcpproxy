@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/hoophq/mcpproxy/audit"
@@ -13,9 +14,18 @@ import (
 	"github.com/hoophq/mcpproxy/mcp"
 )
 
-// errRedactHook replaces a Redact hook error, which can quote the text: the
-// hook's own error never reaches an event, a log line or the client.
-var errRedactHook = errors.New("redaction failed")
+// maxRedactDepth caps the nesting of structuredContent. A deeper value is
+// denied, as on a hook error.
+const maxRedactDepth = 128
+
+// The reasons a result is withheld. A Redact hook error can quote the text,
+// so errRedactHook replaces it: the hook's own error never reaches an event,
+// a log line or the client.
+var (
+	errRedactHook     = errors.New("redaction failed")
+	errRedactDepth    = fmt.Errorf("structuredContent nests deeper than %d levels", maxRedactDepth)
+	errRedactCanceled = errors.New("redaction canceled")
+)
 
 // Redactor masks sensitive strings in tools/call and resources/read results:
 // content[].text, content[].resource.text, contents[].text and every string
@@ -65,12 +75,12 @@ func (r *Redactor) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 		var n int
 		var err error
 		if field == "structuredContent" {
-			out, n, err = w.value(raw)
+			out, n, err = w.values(raw)
 		} else {
 			out, n, err = w.array(raw, w.item)
 		}
 		if err != nil {
-			return r.deny(ctx, s, m)
+			return r.deny(ctx, s, m, err)
 		}
 		if n > 0 {
 			result[field] = out
@@ -82,9 +92,9 @@ func (r *Redactor) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 		return inspect.AllowAll
 	}
 
-	out, err := json.Marshal(result)
+	out, err := encode(result)
 	if err != nil {
-		return r.deny(ctx, s, m)
+		return r.deny(ctx, s, m, err)
 	}
 	m.Env.Result = out
 	emit(ctx, r.sink, s, audit.Event{
@@ -94,9 +104,15 @@ func (r *Redactor) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 	return inspect.AllowAll
 }
 
-// deny withholds the result with a fixed reason.
-func (r *Redactor) deny(ctx context.Context, s inspect.Session, m *inspect.Msg) inspect.Decision {
-	reason := "result withheld: " + errRedactHook.Error()
+// deny withholds the result. The reason is one of the fixed errRedact* texts.
+func (r *Redactor) deny(ctx context.Context, s inspect.Session, m *inspect.Msg, err error) inspect.Decision {
+	cause := errRedactHook
+	for _, known := range []error{errRedactDepth, errRedactCanceled} {
+		if errors.Is(err, known) {
+			cause = known
+		}
+	}
+	reason := "result withheld: " + cause.Error()
 	emit(ctx, r.sink, s, audit.Event{
 		Type: audit.EventToolDenied, Backend: m.Backend, Tool: m.CorrelatedTool,
 		Rule: NameRedact, Reason: reason,
@@ -138,32 +154,61 @@ func (w *walker) item(raw json.RawMessage) (json.RawMessage, int, error) {
 	})
 }
 
-// value masks every string in a JSON value, at any depth. Object keys are
-// structure.
-func (w *walker) value(raw json.RawMessage) (json.RawMessage, int, error) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
+// values masks every string value of a JSON value in one pass over its bytes.
+// Object keys, numbers and unmasked strings are copied byte for byte.
+func (w *walker) values(raw json.RawMessage) (json.RawMessage, int, error) {
+	var out, stack []byte
+	key := false
+	last, total := 0, 0
+	for i := 0; i < len(raw); i++ {
+		switch c := raw[i]; c {
+		case '{', '[':
+			if len(stack) == maxRedactDepth {
+				return nil, 0, errRedactDepth
+			}
+			stack = append(stack, c)
+			key = c == '{'
+		case '}', ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		case ',':
+			key = len(stack) > 0 && stack[len(stack)-1] == '{'
+		case ':':
+			key = false
+		case '"':
+			end := stringEnd(raw, i)
+			if !key {
+				masked, n, err := w.str(raw[i:end])
+				if err != nil {
+					return nil, 0, err
+				}
+				if n > 0 {
+					out = append(append(out, raw[last:i]...), masked...)
+					last = end
+					total += n
+				}
+			}
+			i = end - 1
+		}
+	}
+	if total == 0 {
 		return raw, 0, nil
 	}
-	switch trimmed[0] {
-	case '"':
-		return w.str(raw)
-	case '[':
-		return w.array(raw, w.value)
-	case '{':
-		return w.object(raw, func(fields map[string]json.RawMessage) (int, error) {
-			total := 0
-			for k, v := range fields {
-				n, err := w.set(fields, k, v, w.value)
-				if err != nil {
-					return 0, err
-				}
-				total += n
-			}
-			return total, nil
-		})
+	return append(out, raw[last:]...), total, nil
+}
+
+// stringEnd returns the index just past the JSON string that opens at raw[i].
+func stringEnd(raw []byte, i int) int {
+	for j := i + 1; j < len(raw); j++ {
+		switch raw[j] {
+		case '\\':
+			j++
+		case '"':
+			return j + 1
+		}
 	}
-	return raw, 0, nil
+	return len(raw)
 }
 
 // array applies fn to each element of a JSON array.
@@ -186,7 +231,7 @@ func (w *walker) array(raw json.RawMessage, fn func(json.RawMessage) (json.RawMe
 	if total == 0 {
 		return raw, 0, nil
 	}
-	out, err := json.Marshal(elems)
+	out, err := encode(elems)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -207,7 +252,7 @@ func (w *walker) object(raw json.RawMessage, fn func(map[string]json.RawMessage)
 	if n == 0 {
 		return raw, 0, nil
 	}
-	out, err := json.Marshal(fields)
+	out, err := encode(fields)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -220,12 +265,7 @@ func (w *walker) leaf(fields map[string]json.RawMessage, key string) (int, error
 	if !ok {
 		return 0, nil
 	}
-	return w.set(fields, key, v, w.str)
-}
-
-// set stores fn(v) under key when fn masked something.
-func (w *walker) set(fields map[string]json.RawMessage, key string, v json.RawMessage, fn func(json.RawMessage) (json.RawMessage, int, error)) (int, error) {
-	out, n, err := fn(v)
+	out, n, err := w.str(v)
 	if err != nil || n == 0 {
 		return 0, err
 	}
@@ -239,6 +279,9 @@ func (w *walker) str(raw json.RawMessage) (json.RawMessage, int, error) {
 	if err := json.Unmarshal(raw, &text); err != nil || text == "" {
 		return raw, 0, nil
 	}
+	if w.ctx.Err() != nil {
+		return nil, 0, errRedactCanceled
+	}
 	masked, n, err := w.redact(w.ctx, text)
 	if err != nil {
 		return nil, 0, errRedactHook
@@ -246,9 +289,21 @@ func (w *walker) str(raw json.RawMessage) (json.RawMessage, int, error) {
 	if n <= 0 {
 		return raw, 0, nil
 	}
-	out, err := json.Marshal(masked)
+	out, err := encode(masked)
 	if err != nil {
 		return nil, 0, err
 	}
 	return out, n, nil
+}
+
+// encode marshals v without HTML escaping, so keys and strings already on the
+// wire keep their bytes.
+func encode(v any) (json.RawMessage, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }

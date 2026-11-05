@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/hoophq/mcpproxy/audit"
 	"github.com/hoophq/mcpproxy/inspect"
@@ -142,46 +144,85 @@ func maskOrFail(ctx context.Context, text string) (string, int, error) {
 func TestRedactStructuredContentEveryString(t *testing.T) {
 	s, rec, ctx := newSession(t), &recorder{}, context.Background()
 	r := NewRedactor(inspect.Hooks{Redact: maskSecret}, rec)
-	msg := responseMsg(t, mcp.MethodToolsCall, "lookup", map[string]any{
-		"content": []any{textItem("see structuredContent")},
-		"structuredContent": json.RawMessage(`{"id":12345678901234567890,` +
-			`"user":{"name":"SECRET","age":42,"tags":["a SECRET","plain",true,null]},` +
-			`"SECRET":"keys are structure"}`),
-	})
+	in := `{"id":12345678901234567890,"a<b&c":1.50e+2,"esc":"caf\u00e9 <x>",` +
+		`"user":{"name":"SECRET","age":42,"tags":["a SECRET","plain",true,null]},` +
+		`"SECRET":"keys are structure","SECRET":"dup SECRET"}`
+	want := `{"id":12345678901234567890,"a<b&c":1.50e+2,"esc":"caf\u00e9 <x>",` +
+		`"user":{"name":"[REDACTED]","age":42,"tags":["a [REDACTED]","plain",true,null]},` +
+		`"SECRET":"keys are structure","SECRET":"dup [REDACTED]"}`
+	msg := responseMsg(t, mcp.MethodToolsCall, "lookup", nil)
+	msg.Env.Result = json.RawMessage(`{"content":[{"type":"text","text":"see structuredContent"}],"structuredContent":` + in + `}`)
 	if got := r.Inspect(ctx, s, msg); got.Verdict != inspect.Allow {
 		t.Fatalf("verdict = %s, want Allow", verdictString(got.Verdict))
 	}
 	var res map[string]json.RawMessage
 	_ = json.Unmarshal(msg.Env.Result, &res)
-	sc := string(res["structuredContent"])
-	var got struct {
-		ID   json.Number `json:"id"`
-		User struct {
-			Name string `json:"name"`
-			Age  int    `json:"age"`
-			Tags []any  `json:"tags"`
-		} `json:"user"`
-		Key string `json:"SECRET"`
+	if got := string(res["structuredContent"]); got != want {
+		t.Errorf("structuredContent =\n%s\nwant only the string values masked, keys and numbers byte for byte:\n%s", got, want)
 	}
-	dec := json.NewDecoder(strings.NewReader(sc))
-	dec.UseNumber()
-	if err := dec.Decode(&got); err != nil {
-		t.Fatalf("structuredContent is no longer valid JSON: %v", err)
+	if ev, _ := rec.last(audit.EventRedacted); ev.Fields["redactions"] != 3 {
+		t.Errorf("redactions = %v, want 3", ev.Fields["redactions"])
 	}
-	if got.User.Name != "[REDACTED]" || got.User.Tags[0] != "a [REDACTED]" {
-		t.Errorf("nested strings not masked: %+v", got.User)
+}
+
+// Nesting past the cap is denied before any hook call, and fast. A result at
+// the cap is still masked.
+func TestRedactStructuredContentDepthCap(t *testing.T) {
+	nested := func(depth int) string {
+		return strings.Repeat("[", depth) + `"ana SECRET"` + strings.Repeat("]", depth)
 	}
-	if got.User.Tags[1] != "plain" || got.User.Tags[2] != true || got.User.Tags[3] != nil || got.User.Age != 42 {
-		t.Errorf("non-matching values changed: %+v", got.User)
+	var calls atomic.Int64
+	count := func(ctx context.Context, text string) (string, int, error) {
+		calls.Add(1)
+		return maskSecret(ctx, text)
 	}
-	if got.ID != "12345678901234567890" {
-		t.Errorf("id = %s, want the number byte for byte", got.ID)
+
+	s, rec, ctx := newSession(t), &recorder{}, context.Background()
+	r := NewRedactor(inspect.Hooks{Redact: count}, rec)
+	msg := responseMsg(t, mcp.MethodToolsCall, "deep", map[string]any{"structuredContent": json.RawMessage(nested(maxRedactDepth))})
+	if got := r.Inspect(ctx, s, msg); got.Verdict != inspect.Allow {
+		t.Fatalf("depth %d: verdict = %s, want Allow", maxRedactDepth, verdictString(got.Verdict))
 	}
-	if got.Key != "keys are structure" {
-		t.Errorf("object key or its clean value changed: %q", got.Key)
+	if !strings.Contains(string(msg.Env.Result), `"ana [REDACTED]"`) {
+		t.Fatalf("depth %d: leaf not masked: %.200s", maxRedactDepth, msg.Env.Result)
 	}
-	if ev, _ := rec.last(audit.EventRedacted); ev.Fields["redactions"] != 2 {
-		t.Errorf("redactions = %v, want 2", ev.Fields["redactions"])
+
+	for _, depth := range []int{maxRedactDepth + 1, 9000} {
+		calls.Store(0)
+		msg := responseMsg(t, mcp.MethodToolsCall, "deep", map[string]any{"structuredContent": json.RawMessage(nested(depth))})
+		start := time.Now()
+		got := r.Inspect(ctx, s, msg)
+		took := time.Since(start)
+		if got.Verdict != inspect.Deny || !strings.Contains(got.Reason, "nests deeper") {
+			t.Fatalf("depth %d: verdict = %s (%q), want Deny for nesting", depth, verdictString(got.Verdict), got.Reason)
+		}
+		if calls.Load() != 0 {
+			t.Errorf("depth %d: hook called %d times before the refusal", depth, calls.Load())
+		}
+		if took > 100*time.Millisecond {
+			t.Errorf("depth %d: took %s", depth, took)
+		}
+	}
+}
+
+// A canceled request stops the walk and withholds the result.
+func TestRedactStopsOnCancel(t *testing.T) {
+	var calls atomic.Int64
+	count := func(ctx context.Context, text string) (string, int, error) {
+		calls.Add(1)
+		return maskSecret(ctx, text)
+	}
+	s, rec := newSession(t), &recorder{}
+	r := NewRedactor(inspect.Hooks{Redact: count}, rec)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	msg := responseMsg(t, mcp.MethodToolsCall, "t", map[string]any{"structuredContent": map[string]any{"a": "SECRET"}})
+	got := r.Inspect(ctx, s, msg)
+	if got.Verdict != inspect.Deny || !strings.Contains(got.Reason, "canceled") {
+		t.Fatalf("verdict = %s (%q), want Deny on cancel", verdictString(got.Verdict), got.Reason)
+	}
+	if calls.Load() != 0 {
+		t.Errorf("hook called %d times after cancel", calls.Load())
 	}
 }
 
