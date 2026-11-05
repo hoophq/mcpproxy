@@ -26,7 +26,7 @@ const (
 	EventApprovalPending  EventType = "mcp.approval_pending"
 	EventApprovalResolved EventType = "mcp.approval_resolved"
 	EventBudgetExceeded   EventType = "mcp.budget_exceeded"
-	EventRedacted         EventType = "mcp.redacted"
+	EventRedacted         EventType = "mcp.redacted" // one per masked message; Fields["redactions"] (int) sums the hook counts
 	EventGuardrailBlock   EventType = "mcp.guardrail_block"
 	EventSessionKilled    EventType = "mcp.session_killed"
 	EventError            EventType = "mcp.error"

@@ -38,7 +38,7 @@ hooks := inspect.Hooks{
     GuardInput: func(ctx context.Context, dir inspect.Direction, text string) error { … },
 
     // Mask sensitive content in result text leaves. Returns redacted
-    // text + count (count>0 emits mcp.redacted).
+    // text + count (count>0 emits mcp.redacted). Error => result denied.
     Redact: func(ctx context.Context, text string) (string, int, error) { … },
 
     // Classify a tool call pre-flight; block=true denies THIS request
