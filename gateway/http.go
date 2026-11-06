@@ -100,6 +100,7 @@ func (g *Gateway) handlePost(w http.ResponseWriter, r *http.Request, identity in
 		return
 	}
 	if k, ok := env.FoldedField(); ok {
+		g.observeRefused(env)
 		writeJSON(w, http.StatusOK, jsonrpc.NewError(env.ID, jsonrpc.CodeInvalidRequest,
 			fmt.Sprintf("field %q equals a JSON-RPC field without case", k)))
 		return
@@ -186,12 +187,14 @@ func (c *conn) handleC2S(ctx context.Context, env *jsonrpc.Message) (*jsonrpc.Me
 				Time: time.Now(), Type: audit.EventToolDenied, Session: c.state.ID(),
 				User: c.state.Identity().Subject, Rule: "invalid_params", Reason: reason,
 			})
+			c.g.observeRefused(env)
 			return jsonrpc.NewError(env.ID, jsonrpc.CodeInvalidParams, reason), nil
 		}
 		full := call.Name
 		var bare string
 		bc, bare, err = c.routeTool(full)
 		if err != nil {
+			c.g.observeRefused(env)
 			return jsonrpc.NewError(env.ID, jsonrpc.CodeMethodNotFound, err.Error()), nil
 		}
 		toolName = bare

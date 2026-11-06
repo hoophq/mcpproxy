@@ -327,6 +327,19 @@ func (c *conn) runPipeline(ctx context.Context, m *inspect.Msg) inspect.Decision
 	return dec
 }
 
+// observeRefused reports a client message refused before the pipeline ran.
+func (g *Gateway) observeRefused(env *jsonrpc.Message) {
+	obs := g.opts.Observer
+	if obs == nil {
+		return
+	}
+	tool := ""
+	if env.Method == mcp.MethodToolsCall {
+		tool = inspect.RawTool(env.Params)
+	}
+	obs.ObserveMessage(inspect.C2S, "", env.Method, tool, verdictName(inspect.Deny), 0)
+}
+
 func verdictName(v inspect.Verdict) string {
 	switch v {
 	case inspect.Allow:
