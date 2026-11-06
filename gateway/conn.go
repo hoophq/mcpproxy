@@ -328,16 +328,11 @@ func (c *conn) runPipeline(ctx context.Context, m *inspect.Msg) inspect.Decision
 }
 
 // observeRefused reports a client message refused before the pipeline ran.
+// Its params are not trusted, so it names no tool.
 func (g *Gateway) observeRefused(env *jsonrpc.Message) {
-	obs := g.opts.Observer
-	if obs == nil {
-		return
+	if obs := g.opts.Observer; obs != nil {
+		obs.ObserveMessage(inspect.C2S, "", env.Method, "", verdictName(inspect.Deny), 0)
 	}
-	tool := ""
-	if env.Method == mcp.MethodToolsCall {
-		tool = inspect.RawTool(env.Params)
-	}
-	obs.ObserveMessage(inspect.C2S, "", env.Method, tool, verdictName(inspect.Deny), 0)
 }
 
 func verdictName(v inspect.Verdict) string {

@@ -70,11 +70,7 @@ func TestAMessageRefusedBeforeThePipelineIsObserved(t *testing.T) {
 			t.Errorf("%s: %d %v, want %s", tc.msg, code, m, tc.code)
 		}
 	}
-	c2s := fmt.Sprint(inspect.C2S)
-	if n := obs.count(c2s + "|tools/call|slow|deny"); n != 1 {
-		t.Errorf("invalid params observed %d times, want 1: %v", n, obs.msgs)
-	}
-	if n := obs.count(c2s + "|tools/call|echo|deny"); n != 1 {
-		t.Errorf("folded field observed %d times, want 1: %v", n, obs.msgs)
+	if n := obs.count(fmt.Sprint(inspect.C2S) + "|tools/call||deny"); n != 2 {
+		t.Errorf("observed %d refusals with no tool, want 2: %v", n, obs.msgs)
 	}
 }
