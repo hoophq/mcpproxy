@@ -38,7 +38,9 @@ hooks := inspect.Hooks{
     GuardInput: func(ctx context.Context, dir inspect.Direction, text string) error { … },
 
     // Mask sensitive content in result text leaves. Returns redacted
-    // text + count (count>0 emits mcp.redacted).
+    // text + count (count>0 emits mcp.redacted). Called once per string
+    // value, within RequestTimeout; keys are not masked. Error, timeout
+    // or an ambiguous key => result denied.
     Redact: func(ctx context.Context, text string) (string, int, error) { … },
 
     // Classify a tool call pre-flight; block=true denies THIS request
@@ -109,6 +111,15 @@ grant keys), `outbound.WithClientToken` (passthrough), and
 `outbound.WithInboundToken` (token exchange subject) on the request
 context before the gateway handles it. Do this in the resolver, which
 runs first and may rewrite the request context.
+
+A reply the gateway sends on its own to a server request carries the
+context values of the session's latest request, so a `TokenSource`
+resolves the same caller as for that request.
+
+An `sse` backend opens its event stream once, at session start, with the
+credential of the caller that opened the session. A token the caller
+rotates later is not used on that stream; each message POST carries the
+credential of its own request.
 
 ## Custom checks
 

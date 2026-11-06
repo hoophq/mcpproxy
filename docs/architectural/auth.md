@@ -43,6 +43,10 @@ tokens it issued itself.
 | `passthrough` | caller supplies the upstream credential per request via `X-Mcpproxy-Upstream-Authorization`; gateway stores nothing |
 | `oauth` | the full MCP authorization flow (below) |
 
+On an `sse` backend the event stream opens once per session, with the
+credential of the caller that opened it. A token the caller rotates later
+reaches the message POSTs, not that stream.
+
 ### The OAuth flow
 
 ```

@@ -191,6 +191,7 @@ func (g *Gateway) startSession(ctx context.Context, identity inspect.Identity) (
 		done:     make(chan struct{}),
 	}
 	c.touch()
+	c.setCaller(ctx)
 	// Backends live as long as the session, not the initialize request.
 	// ctx here is the POST's request context and cancels the moment the
 	// handler writes the response, which would kill stdio children

@@ -13,6 +13,7 @@ const (
 	MethodToolsListChanged      = "notifications/tools/list_changed"
 	MethodResourcesList         = "resources/list"
 	MethodResourcesRead         = "resources/read"
+	MethodTasksResult           = "tasks/result"
 	MethodPromptsList           = "prompts/list"
 	MethodPromptsGet            = "prompts/get"
 	MethodSamplingCreateMessage = "sampling/createMessage"

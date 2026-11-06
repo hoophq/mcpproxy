@@ -159,6 +159,35 @@ embed the gateway and supply their own implementations of:
   the host already authenticated the caller)
 - `gateway.Observer`: telemetry
 
+`inspect.Hooks.Redact` masks string values, never object keys, in
+`tools/call`, `resources/read` and `tasks/result` results: `content[].text`,
+`content[].resource.text`, `contents[].text` and every string of
+`structuredContent`. A client that matches keys without case could read a
+value the hook never saw, so a result is withheld when the response, the
+result, a content entry or its resource repeats a key or spells `result`,
+`content`, `contents`, `structuredContent`, `text` or `resource` another way.
+A result that is not an object, or one of those fields of an unexpected type
+(a `content` that is not an array, a `text` that is not a string), is withheld
+too. A `null` in any of those places carries no text and passes. Duplicate
+keys inside `structuredContent` are masked.
+
+The hook runs once per string, in turn: a `structuredContent` table of 1,000
+rows by 10 columns costs 10,000 calls. They share the request's
+`RequestTimeout` with the backend call, and a result still unmasked when it
+expires is withheld.
+
+A hook error withholds the result: the client gets `-32010`, and the hook's
+error is never recorded.
+
+A reply the gateway sends on its own to a server request carries the
+context values of the session's latest request, so a `TokenSource`
+resolves the same caller as for that request.
+
+An `sse` backend opens its event stream once, at session start, with the
+credential of the caller that opened the session. A token the caller
+rotates later is not used on that stream; each message POST carries the
+credential of its own request.
+
 Import it the way any Go dependency is imported:
 
 ```sh

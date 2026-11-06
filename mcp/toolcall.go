@@ -8,11 +8,6 @@ import (
 	"unicode"
 )
 
-var (
-	foldedName      = foldKey("name")
-	foldedArguments = foldKey("arguments")
-)
-
 // ParseToolCall reads a tools/call's name and arguments by their exact keys,
 // as an MCP server does. Go's JSON decoder matches keys without case, so it
 // refuses params with two keys equal under strings.EqualFold, or a key that
@@ -23,22 +18,8 @@ func ParseToolCall(params json.RawMessage) (ToolsCallParams, error) {
 	if err := json.Unmarshal(params, &fields); err != nil || fields == nil {
 		return ToolsCallParams{}, errors.New("params are not an object")
 	}
-	if members(params) != len(fields) {
-		return ToolsCallParams{}, errors.New("params repeat a key")
-	}
-	seen := make(map[string]string, len(fields))
-	for key := range fields {
-		f := foldKey(key)
-		if prev, dup := seen[f]; dup {
-			return ToolsCallParams{}, fmt.Errorf("keys %q and %q are equal without case", prev, key)
-		}
-		seen[f] = key
-		switch {
-		case f == foldedName && key != "name":
-			return ToolsCallParams{}, fmt.Errorf("key %q is not %q", key, "name")
-		case f == foldedArguments && key != "arguments":
-			return ToolsCallParams{}, fmt.Errorf("key %q is not %q", key, "arguments")
-		}
+	if err := ExactKeys(params, fields, "name", "arguments"); err != nil {
+		return ToolsCallParams{}, fmt.Errorf("params: %w", err)
 	}
 	var p ToolsCallParams
 	if err := json.Unmarshal(fields["name"], &p.Name); err != nil || p.Name == "" {
@@ -46,6 +27,30 @@ func ParseToolCall(params json.RawMessage) (ToolsCallParams, error) {
 	}
 	p.Arguments = fields["arguments"]
 	return p, nil
+}
+
+// ExactKeys refuses obj, a JSON object decoded into fields, when a reader that
+// matches keys without case, as Go's JSON decoder does, could read another
+// value than fields[k] for one of keys: obj repeats a key, holds two keys
+// equal under strings.EqualFold, or a key that only folds to one of keys.
+func ExactKeys(obj json.RawMessage, fields map[string]json.RawMessage, keys ...string) error {
+	if members(obj) != len(fields) {
+		return errors.New("a key repeats")
+	}
+	seen := make(map[string]string, len(fields))
+	for key := range fields {
+		f := foldKey(key)
+		if prev, dup := seen[f]; dup {
+			return fmt.Errorf("keys %q and %q are equal without case", prev, key)
+		}
+		seen[f] = key
+	}
+	for _, want := range keys {
+		if key, ok := seen[foldKey(want)]; ok && key != want {
+			return fmt.Errorf("key %q is not %q", key, want)
+		}
+	}
+	return nil
 }
 
 // members counts the members of obj, a valid JSON object.
