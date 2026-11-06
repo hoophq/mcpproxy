@@ -424,6 +424,50 @@ func TestRedactKeepsAResultWithOtherKeys(t *testing.T) {
 	}
 }
 
+func TestRedactDeniesAFieldOfAnUnexpectedType(t *testing.T) {
+	r := NewRedactor(inspect.Hooks{Redact: maskSecret}, &recorder{})
+	inspectResult := func(t *testing.T, method, result string) inspect.Decision {
+		t.Helper()
+		msg := &inspect.Msg{Dir: inspect.S2C, CorrelatedMethod: method, CorrelatedTool: "t",
+			Env: &jsonrpc.Message{JSONRPC: "2.0", ID: rawID("9"), Result: json.RawMessage(result)}}
+		got := r.Inspect(context.Background(), newSession(t), msg)
+		if got.Verdict == inspect.Allow && strings.Contains(string(msg.Env.Result), "SECRET") {
+			t.Errorf("SECRET left in clear: %s", msg.Env.Result)
+		}
+		return got
+	}
+	for _, result := range []string{
+		`[{"type":"text","text":"SECRET"}]`,
+		`"SECRET"`,
+		`{"content":{"type":"text","text":"SECRET"}}`,
+		`{"content":["SECRET"]}`,
+		`{"content":[{"type":"text","text":["SECRET"]}]}`,
+		`{"content":[{"type":"text","text":{"a":"SECRET"}}]}`,
+		`{"content":[{"type":"resource","resource":["SECRET"]}]}`,
+		`{"content":[{"type":"resource","resource":{"uri":"u","text":{"a":"SECRET"}}}]}`,
+		`{"contents":{"uri":"u","text":"SECRET"}}`,
+	} {
+		t.Run(result, func(t *testing.T) {
+			got := inspectResult(t, mcp.MethodToolsCall, result)
+			if got.Verdict != inspect.Deny || !strings.Contains(got.Reason, errRedactShape.Error()) {
+				t.Errorf("verdict = %s (%q), want Deny", verdictString(got.Verdict), got.Reason)
+			}
+		})
+	}
+	for _, result := range []string{
+		`null`,
+		`{"content":null,"contents":null,"structuredContent":null}`,
+		`{"content":[null,{"type":"text","text":null},{"type":"resource","resource":null}]}`,
+		`{"content":[{"type":"image","data":"aGk=","mimeType":"image/png"}]}`,
+	} {
+		t.Run(result, func(t *testing.T) {
+			if got := inspectResult(t, mcp.MethodToolsCall, result); got.Verdict != inspect.Allow {
+				t.Errorf("verdict = %s (%q), want Allow", verdictString(got.Verdict), got.Reason)
+			}
+		})
+	}
+}
+
 func TestRedactDeniesWhenCanceledDuringTheLastHookCall(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

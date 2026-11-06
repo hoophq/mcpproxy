@@ -26,6 +26,7 @@ var (
 	errRedactDepth    = fmt.Errorf("structuredContent nests deeper than %d levels", maxRedactDepth)
 	errRedactCanceled = errors.New("redaction canceled")
 	errRedactKeys     = errors.New("a result key repeats or differs in case")
+	errRedactShape    = errors.New("a result field has an unexpected type")
 )
 
 // Redactor masks sensitive strings in tools/call, resources/read and
@@ -34,8 +35,8 @@ var (
 // and other fields are structural, and rewriting them would break the
 // protocol. A client that matches keys without case could read a value the
 // redactor did not, so a repeated key, or one that only folds to a key read
-// here, denies the result. So does a Redact hook error: unmasked text never
-// reaches the client.
+// here, denies the result. So do a field read here of an unexpected type and
+// a Redact hook error: unmasked text never reaches the client.
 type Redactor struct {
 	redact func(ctx context.Context, text string) (string, int, error)
 	sink   audit.Sink
@@ -69,7 +70,7 @@ func (r *Redactor) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 	}
 	var result map[string]json.RawMessage
 	if err := json.Unmarshal(m.Env.Result, &result); err != nil {
-		return inspect.AllowAll
+		return r.deny(ctx, s, m, errRedactShape)
 	}
 	if mcp.ExactKeys(m.Env.Result, result, "content", "contents", "structuredContent") != nil {
 		return r.deny(ctx, s, m, errRedactKeys)
@@ -119,7 +120,7 @@ func (r *Redactor) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 // deny withholds the result. The reason is one of the fixed errRedact* texts.
 func (r *Redactor) deny(ctx context.Context, s inspect.Session, m *inspect.Msg, err error) inspect.Decision {
 	cause := errRedactHook
-	for _, known := range []error{errRedactDepth, errRedactCanceled, errRedactKeys} {
+	for _, known := range []error{errRedactDepth, errRedactCanceled, errRedactKeys, errRedactShape} {
 		if errors.Is(err, known) {
 			cause = known
 		}
@@ -134,8 +135,8 @@ func (r *Redactor) deny(ctx context.Context, s inspect.Session, m *inspect.Msg, 
 
 // walker runs the Redact hook over the strings of one result. Each method
 // returns the new bytes and the redaction count; count 0 means the input is
-// unchanged. A value of an unexpected shape carries no text leaf and is left
-// as it is.
+// unchanged. A null value is left as it is; a value of another unexpected type
+// fails with errRedactShape.
 type walker struct {
 	ctx    context.Context
 	redact func(ctx context.Context, text string) (string, int, error)
@@ -227,7 +228,7 @@ func stringEnd(raw []byte, i int) int {
 func (w *walker) array(raw json.RawMessage, fn func(json.RawMessage) (json.RawMessage, int, error)) (json.RawMessage, int, error) {
 	var elems []json.RawMessage
 	if err := json.Unmarshal(raw, &elems); err != nil {
-		return raw, 0, nil
+		return nil, 0, errRedactShape
 	}
 	total := 0
 	for i, v := range elems {
@@ -254,7 +255,10 @@ func (w *walker) array(raw json.RawMessage, fn func(json.RawMessage) (json.RawMe
 // again when fn masked something. keys are the fields fn reads.
 func (w *walker) object(raw json.RawMessage, keys []string, fn func(map[string]json.RawMessage) (int, error)) (json.RawMessage, int, error) {
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, 0, errRedactShape
+	}
+	if fields == nil {
 		return raw, 0, nil
 	}
 	if mcp.ExactKeys(raw, fields, keys...) != nil {
@@ -291,7 +295,10 @@ func (w *walker) leaf(fields map[string]json.RawMessage, key string) (int, error
 // str runs the hook over one JSON string.
 func (w *walker) str(raw json.RawMessage) (json.RawMessage, int, error) {
 	var text string
-	if err := json.Unmarshal(raw, &text); err != nil || text == "" {
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return nil, 0, errRedactShape
+	}
+	if text == "" {
 		return raw, 0, nil
 	}
 	if w.ctx.Err() != nil {

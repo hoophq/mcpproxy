@@ -166,7 +166,9 @@ embed the gateway and supply their own implementations of:
 value the hook never saw, so a result is withheld when the response, the
 result, a content entry or its resource repeats a key or spells `result`,
 `content`, `contents`, `structuredContent`, `text` or `resource` another way.
-Duplicate keys inside `structuredContent` are masked.
+A result that is not an object, or one of those fields of an unexpected type
+(a `content` that is not an array, a `text` that is not a string), is withheld
+too. Duplicate keys inside `structuredContent` are masked.
 
 The hook runs once per string, in turn: a `structuredContent` table of 1,000
 rows by 10 columns costs 10,000 calls. They share the request's
