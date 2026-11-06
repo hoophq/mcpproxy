@@ -368,3 +368,73 @@ func TestRedactSkipsErrorResponses(t *testing.T) {
 		t.Fatalf("verdict = %s, want Allow", verdictString(got.Verdict))
 	}
 }
+
+func TestRedactDeniesAResultKeyThatRepeatsOrDiffersInCase(t *testing.T) {
+	r := NewRedactor(inspect.Hooks{Redact: maskSecret}, &recorder{})
+	deny := func(t *testing.T, env *jsonrpc.Message) {
+		t.Helper()
+		msg := &inspect.Msg{Dir: inspect.S2C, CorrelatedMethod: mcp.MethodToolsCall, CorrelatedTool: "t", Env: env}
+		got := r.Inspect(context.Background(), newSession(t), msg)
+		if got.Verdict != inspect.Deny || !strings.Contains(got.Reason, errRedactKeys.Error()) {
+			t.Errorf("verdict = %s (%q), want Deny", verdictString(got.Verdict), got.Reason)
+		}
+		if strings.Contains(got.Reason, "SECRET") {
+			t.Errorf("reason quotes the result: %q", got.Reason)
+		}
+	}
+	for _, result := range []string{
+		`{"Content":[{"type":"text","text":"SECRET"}]}`,
+		`{"content":[{"type":"text","text":"ok"}],"CONTENT":[{"type":"text","text":"SECRET"}]}`,
+		`{"content":[{"type":"text","text":"SECRET"}],"content":[]}`,
+		`{"contentſ":[{"type":"text","text":"SECRET"}]}`,
+		`{"ſtructuredContent":{"a":"SECRET"}}`,
+		`{"content":[{"type":"text","Text":"SECRET"}]}`,
+		`{"content":[{"type":"text","text":"SECRET","text":"ok"}]}`,
+		`{"content":[{"type":"text","text":"ok","text":"SECRET"}]}`,
+		`{"content":[{"type":"resource","resource":{"uri":"u","Text":"SECRET"}}]}`,
+		`{"content":[{"type":"resource","Resource":{"uri":"u","text":"SECRET"}}]}`,
+		`{"contents":[{"uri":"u","TEXT":"SECRET"}]}`,
+	} {
+		t.Run(result, func(t *testing.T) {
+			deny(t, &jsonrpc.Message{JSONRPC: "2.0", ID: rawID("9"), Result: json.RawMessage(result)})
+		})
+	}
+	t.Run("envelope", func(t *testing.T) {
+		env, err := jsonrpc.Parse([]byte(`{"jsonrpc":"2.0","id":9,"result":{"content":[]},"Result":{"content":[{"type":"text","text":"SECRET"}]}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		deny(t, env)
+	})
+}
+
+func TestRedactKeepsAResultWithOtherKeys(t *testing.T) {
+	r := NewRedactor(inspect.Hooks{Redact: maskSecret}, &recorder{})
+	msg := responseMsg(t, mcp.MethodToolsCall, "t", map[string]any{
+		"content":           []any{map[string]any{"type": "text", "text": "SECRET", "_meta": map[string]any{}}},
+		"structuredContent": map[string]any{"Text": "SECRET", "text": "ok"},
+		"isError":           false,
+		"_meta":             map[string]any{"k": 1},
+	})
+	if got := r.Inspect(context.Background(), newSession(t), msg); got.Verdict != inspect.Allow {
+		t.Fatalf("verdict = %s (%q), want Allow", verdictString(got.Verdict), got.Reason)
+	}
+	if strings.Contains(string(msg.Env.Result), "SECRET") {
+		t.Fatalf("result not masked: %s", msg.Env.Result)
+	}
+}
+
+func TestRedactDeniesWhenCanceledDuringTheLastHookCall(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hook := func(_ context.Context, text string) (string, int, error) {
+		cancel()
+		return text, 0, nil
+	}
+	r := NewRedactor(inspect.Hooks{Redact: hook}, &recorder{})
+	msg := responseMsg(t, mcp.MethodToolsCall, "t", map[string]any{"content": []any{textItem("SECRET")}})
+	got := r.Inspect(ctx, newSession(t), msg)
+	if got.Verdict != inspect.Deny || !strings.Contains(got.Reason, errRedactCanceled.Error()) {
+		t.Fatalf("verdict = %s (%q), want Deny on cancel", verdictString(got.Verdict), got.Reason)
+	}
+}

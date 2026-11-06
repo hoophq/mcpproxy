@@ -162,12 +162,16 @@ embed the gateway and supply their own implementations of:
 `inspect.Hooks.Redact` masks string values, never object keys, in
 `tools/call`, `resources/read` and `tasks/result` results: `content[].text`,
 `content[].resource.text`, `contents[].text` and every string of
-`structuredContent`. Only those exact keys are read: another spelling, or an
-earlier duplicate of `content`, `contents`, `structuredContent`, `text` or
-`resource`, is not masked. Duplicate keys inside `structuredContent` are.
+`structuredContent`. A client that matches keys without case could read a
+value the hook never saw, so a result is withheld when the response, the
+result, a content entry or its resource repeats a key or spells `result`,
+`content`, `contents`, `structuredContent`, `text` or `resource` another way.
+Duplicate keys inside `structuredContent` are masked.
 
-The hook runs once per string: a `structuredContent` table of 1,000 rows by
-10 columns costs 10,000 calls.
+The hook runs once per string, in turn: a `structuredContent` table of 1,000
+rows by 10 columns costs 10,000 calls. They share the request's
+`RequestTimeout` with the backend call, and a result still unmasked when it
+expires is withheld.
 
 A hook error withholds the result: the client gets `-32010`, and the hook's
 error is never recorded.

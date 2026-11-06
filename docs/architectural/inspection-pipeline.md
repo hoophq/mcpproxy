@@ -46,7 +46,7 @@ The order is load-bearing:
 | `rug-pull` | invalidates on `notifications/tools/list_changed` | fingerprints every tool (name + description + input schema, SHA-256); a change on a known tool → Kill (default) or audit alert |
 | `overrides` | rewrites aliased `tools/call` names back to real names | renames tools / replaces descriptions in the catalog |
 | `guardrails` | `Hooks.GuardInput` over `tools/call` arguments → Deny | over tool descriptions → Kill (poisoned catalog) |
-| `redact` | (no C2S role) | `Hooks.Redact` over `content[].text`, `content[].resource.text`, `contents[].text` and every string value of `structuredContent` in `tools/call`, `resources/read` and `tasks/result` results, once per string; object keys are not masked; a hook error, or `structuredContent` deeper than 128 levels, denies the result |
+| `redact` | (no C2S role) | `Hooks.Redact` over `content[].text`, `content[].resource.text`, `contents[].text` and every string value of `structuredContent` in `tools/call`, `resources/read` and `tasks/result` results, once per string; object keys are not masked; a hook error, a canceled request, a key read here that repeats or differs in case, or `structuredContent` deeper than 128 levels, denies the result |
 | `audit-tap` | `mcp.tool_call` (args as SHA-256 digest, never verbatim) | `mcp.tools_listed` |
 
 ## Session state (`session.State`)

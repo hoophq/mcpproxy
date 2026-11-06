@@ -25,15 +25,17 @@ var (
 	errRedactHook     = errors.New("redaction failed")
 	errRedactDepth    = fmt.Errorf("structuredContent nests deeper than %d levels", maxRedactDepth)
 	errRedactCanceled = errors.New("redaction canceled")
+	errRedactKeys     = errors.New("a result key repeats or differs in case")
 )
 
 // Redactor masks sensitive strings in tools/call, resources/read and
 // tasks/result results: content[].text, content[].resource.text,
 // contents[].text and every string value of structuredContent. Object keys
 // and other fields are structural, and rewriting them would break the
-// protocol. Only those exact keys are read: another spelling, or a duplicate
-// of one of them, is not masked. A Redact hook error denies the result, so
-// unmasked text never reaches the client.
+// protocol. A client that matches keys without case could read a value the
+// redactor did not, so a repeated key, or one that only folds to a key read
+// here, denies the result. So does a Redact hook error: unmasked text never
+// reaches the client.
 type Redactor struct {
 	redact func(ctx context.Context, text string) (string, int, error)
 	sink   audit.Sink
@@ -62,9 +64,15 @@ func (r *Redactor) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 		return inspect.AllowAll
 	}
 
+	if _, ok := m.Env.FoldedField(); ok {
+		return r.deny(ctx, s, m, errRedactKeys)
+	}
 	var result map[string]json.RawMessage
 	if err := json.Unmarshal(m.Env.Result, &result); err != nil {
 		return inspect.AllowAll
+	}
+	if mcp.ExactKeys(m.Env.Result, result, "content", "contents", "structuredContent") != nil {
+		return r.deny(ctx, s, m, errRedactKeys)
 	}
 
 	w := &walker{ctx: ctx, redact: r.redact}
@@ -111,7 +119,7 @@ func (r *Redactor) Inspect(ctx context.Context, s inspect.Session, m *inspect.Ms
 // deny withholds the result. The reason is one of the fixed errRedact* texts.
 func (r *Redactor) deny(ctx context.Context, s inspect.Session, m *inspect.Msg, err error) inspect.Decision {
 	cause := errRedactHook
-	for _, known := range []error{errRedactDepth, errRedactCanceled} {
+	for _, known := range []error{errRedactDepth, errRedactCanceled, errRedactKeys} {
 		if errors.Is(err, known) {
 			cause = known
 		}
@@ -136,7 +144,7 @@ type walker struct {
 // item masks the text leaf of one content entry and the text of its nested
 // resource.
 func (w *walker) item(raw json.RawMessage) (json.RawMessage, int, error) {
-	return w.object(raw, func(fields map[string]json.RawMessage) (int, error) {
+	return w.object(raw, []string{"text", "resource"}, func(fields map[string]json.RawMessage) (int, error) {
 		n, err := w.leaf(fields, "text")
 		if err != nil {
 			return 0, err
@@ -145,7 +153,7 @@ func (w *walker) item(raw json.RawMessage) (json.RawMessage, int, error) {
 		if !ok {
 			return n, nil
 		}
-		out, rn, err := w.object(res, func(rf map[string]json.RawMessage) (int, error) {
+		out, rn, err := w.object(res, []string{"text"}, func(rf map[string]json.RawMessage) (int, error) {
 			return w.leaf(rf, "text")
 		})
 		if err != nil {
@@ -243,11 +251,14 @@ func (w *walker) array(raw json.RawMessage, fn func(json.RawMessage) (json.RawMe
 }
 
 // object decodes a JSON object, lets fn rewrite its fields, and encodes it
-// again when fn masked something.
-func (w *walker) object(raw json.RawMessage, fn func(map[string]json.RawMessage) (int, error)) (json.RawMessage, int, error) {
+// again when fn masked something. keys are the fields fn reads.
+func (w *walker) object(raw json.RawMessage, keys []string, fn func(map[string]json.RawMessage) (int, error)) (json.RawMessage, int, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		return raw, 0, nil
+	}
+	if mcp.ExactKeys(raw, fields, keys...) != nil {
+		return nil, 0, errRedactKeys
 	}
 	n, err := fn(fields)
 	if err != nil {
@@ -289,6 +300,9 @@ func (w *walker) str(raw json.RawMessage) (json.RawMessage, int, error) {
 	masked, n, err := w.redact(w.ctx, text)
 	if err != nil {
 		return nil, 0, errRedactHook
+	}
+	if w.ctx.Err() != nil {
+		return nil, 0, errRedactCanceled
 	}
 	if n <= 0 {
 		return raw, 0, nil
