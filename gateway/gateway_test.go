@@ -62,6 +62,7 @@ type tclient struct {
 	url     string
 	sid     string
 	version string // sent as MCP-Protocol-Version when set
+	header  http.Header
 }
 
 func (c *tclient) request(body string) *http.Request {
@@ -73,6 +74,9 @@ func (c *tclient) request(body string) *http.Request {
 	}
 	if c.version != "" {
 		req.Header.Set("MCP-Protocol-Version", c.version)
+	}
+	for k, v := range c.header {
+		req.Header[k] = v
 	}
 	return req
 }
