@@ -49,8 +49,8 @@ servers:
 
   cloudflare-docs:
     description: Cloudflare documentation search (official)
-    url: https://docs.mcp.cloudflare.com/sse
-    transport: sse
+    url: https://docs.mcp.cloudflare.com/mcp
+    transport: streamable-http
     auth: none
 
   context7:
@@ -182,7 +182,7 @@ servers:
     description: Semgrep static analysis (official)
     url: https://mcp.semgrep.ai/mcp
     transport: streamable-http
-    auth: none
+    auth: oauth
 
   sentry:
     description: Sentry error tracking (official)

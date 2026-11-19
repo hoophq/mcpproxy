@@ -24,7 +24,7 @@ Before you pick one:
 | Provider | URL | Notes |
 |---|---|---|
 | DeepWiki | `https://mcp.deepwiki.com/mcp` | GitHub repo Q&A |
-| Cloudflare Docs | `https://docs.mcp.cloudflare.com/sse` | ⚠ `transport: sse` |
+| Cloudflare Docs | `https://docs.mcp.cloudflare.com/mcp` | |
 | Hugging Face | `https://huggingface.co/mcp` | anonymous works; HF token adds private access |
 
 Config: [`no-auth.yaml`](no-auth.yaml)
